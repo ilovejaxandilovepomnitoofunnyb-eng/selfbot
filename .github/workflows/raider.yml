@@ -1,0 +1,28 @@
+name: raider
+
+on:
+  workflow_dispatch:
+  schedule:
+    # reinicia a cada ~5h (live 24/7)
+    - cron: '25 */5 * * *'
+
+concurrency:
+  group: raider
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instala deps
+        run: |
+          pip install --quiet discord.py-self Pillow
+      - name: Roda raider
+        env:
+          DISCORD_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: python -u nuke_bot.py

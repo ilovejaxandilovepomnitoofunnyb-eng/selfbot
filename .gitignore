@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+self_token.txt
+alt_token.txt
+bot_token.txt
+token.txt
+*.log
+wl.json
+bl.json
