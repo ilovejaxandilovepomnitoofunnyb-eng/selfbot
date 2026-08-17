@@ -2,9 +2,6 @@ name: raider
 
 on:
   workflow_dispatch:
-  schedule:
-    # reinicia a cada ~5h (live 24/7)
-    - cron: '25 */5 * * *'
 
 concurrency:
   group: raider
@@ -13,7 +10,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

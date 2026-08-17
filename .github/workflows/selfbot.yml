@@ -2,9 +2,6 @@ name: selfbot
 
 on:
   workflow_dispatch:
-  schedule:
-    # reinicia a cada ~5h (live 24/7, repo publico = Actions ilimitado)
-    - cron: '15 */5 * * *'
 
 concurrency:
   group: selfbot
@@ -13,7 +10,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,6 +25,4 @@ jobs:
           ALT_TOKEN: ${{ secrets.ALT_TOKEN }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-        run: |
-          echo "$WEBHOOK_URL" > /tmp/webhook_url.txt
-          python -u selfbot.py
+        run: python -u selfbot.py
