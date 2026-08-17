@@ -57,7 +57,7 @@ intents.presences = False
 bot = commands.Bot(
     command_prefix=PREFIX, intents=intents, help_command=None,
     allowed_mentions=discord.AllowedMentions(
-        everyone=True, here=True, users=True, roles=True),
+        everyone=True, users=True, roles=True),
 )
 
 # USER-INSTALL: habilita comandos em DMs e group DMs
@@ -267,7 +267,7 @@ async def on_command_error(ctx, error):
 
 
 # ============================ HELPERS ============================
-MENTIONS = discord.AllowedMentions(everyone=True, here=True, users=True, roles=True)
+MENTIONS = discord.AllowedMentions(everyone=True, users=True, roles=True)
 
 
 async def _check_ok(ctx) -> bool:
