@@ -310,11 +310,16 @@ async def _check_ok(ctx) -> bool:
 
 
 # ============================ ENVIO / VIEW ============================
-async def _burst_send(channel, n: int, base: str | None) -> int:
-    """Envia n mensagens respeitando o rate limit real (bucket de msg por canal).
-    Cada mensagem leva o GIF custom ANEXADO (discord.File) — não depende de URL.
-    Retorna quantas conseguiu mandar de verdade (429 espera retry_after e continua)."""
+async def _burst_send(channel, n: int, base: str | None,
+                      max_wait: float = 20.0, max_fails: int = 5) -> int:
+    """Envia n mensagens respeitando o rate limit real, SEM travar nunca.
+    - 429 com retry curto: espera e continua.
+    - 429 com retry LONGO (@everyone/ping exaurido): após 5 falhas ou 20s de
+      espera acumulada, ABORTA e retorna o que conseguiu (loop nunca fica infinito).
+    Cada mensagem leva o GIF custom ANEXADO (discord.File)."""
     ok = 0
+    fails = 0
+    waited = 0.0
     for _ in range(n):
         try:
             if base:
@@ -323,13 +328,20 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
                 msg = build_nuke_payload()
             await channel.send(msg, allowed_mentions=MENTIONS, file=_gif_file())
             ok += 1
+            fails = 0
+            waited = 0.0
         except discord.HTTPException as e:
             if e.status == 429:
-                await asyncio.sleep(min(getattr(e, "retry_after", None) or 1.0, 4.0))
+                ra = getattr(e, "retry_after", None) or 1.0
+                fails += 1
+                waited += ra
+                if fails >= max_fails or waited >= max_wait:
+                    break
+                await asyncio.sleep(min(ra, 4.0))
             else:
-                pass
+                break
         except Exception:
-            pass
+            break
         await asyncio.sleep(0.02)
     return ok
 
