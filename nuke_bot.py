@@ -131,25 +131,22 @@ def cunei_text(n_blocos: int = 12, min_rep: int = 8, max_rep: int = 22) -> str:
                     for _ in range(n_blocos))
 
 
-def build_nuke_payload(pings: bool = True) -> str:
+def build_nuke_payload() -> str:
     """~2000 chars estruturados:
        1) linha SOCIETY em caps/bold (bem visivel)
-       2) @everyone/@here em massa (somente quando pings=True — mention budget é finito)
+       2) @everyone/@here em massa
        3) cuneiforme+zalgo pra encher
-       (GIF vai como anexo da mensagem via _gif_file)"""
+       4) URL do GIF custom SEMPRE no final (preview visivel)"""
     # 1) texto visivel
     header = f"🔥 **{SOCIETY_LINE.upper()}** 🔥"
-    # 2) pings (opcional)
-    extra = ""
-    if pings:
-        extra = " " + " ".join(
-            random.choice(["@everyone", "@here", "@everyone @everyone",
-                           "@here @here", "@everyone @here"])
-            for _ in range(random.randint(4, 7)))
+    # 2) pings
+    pings = " ".join(random.choice(["@everyone", "@here", "@everyone @everyone",
+                                    "@here @here", "@everyone @here"])
+                     for _ in range(random.randint(4, 7)))
     # 3) filler cuneiforme/zalgo (o que sobra de espaco)
     filler = []
     cur = 0
-    budget = MAX_MSG - len(header) - len(extra)
+    budget = MAX_MSG - len(header) - len(pings) - 270  # reserva URL
     while cur < budget:
         r = random.random()
         if r < 0.55:
@@ -165,7 +162,7 @@ def build_nuke_payload(pings: bool = True) -> str:
             seg = seg[: budget - cur]
         filler.append(seg)
         cur += len(seg)
-    body = f"{header}{extra}\n{''.join(filler)}"
+    body = f"{header}\n{pings}\n{''.join(filler)}\n{GIF_CUSTOM_URLS[0]}"
     return body[:MAX_MSG]
 
 
@@ -248,6 +245,8 @@ def _gif_file() -> discord.File:
     return discord.File(io.BytesIO(STROBE_GIF), filename="set-society.gif")
 
 
+
+
 # ============================ POLL ============================
 def _build_poll(question: str, options: list) -> discord.Poll:
     p = discord.Poll(question=question[:300],
@@ -312,50 +311,54 @@ async def _check_ok(ctx) -> bool:
     return True
 
 
+# ============================ COMANDOS ============================
+@bot.hybrid_command(name="ping", description="Latência e status")
+@install_any
+@ctx_any
+async def ping(ctx):
+    if not await _check_ok(ctx):
+        return
+    t0 = time.time()
+    msg = await ctx.send("pong...")
+    lat = round(bot.latency * 1000, 1)
+    await msg.edit(content=f"🏓 Pong! `{lat}ms` | API `{round((time.time()-t0)*1000,1)}ms`")
+
+
+@bot.hybrid_command(name="spam", description="Flood 2000 chars + GIF + @everyone. /spam [vezes] [texto]")
+@install_any
+@ctx_any
 # ============================ ENVIO / VIEW ============================
-async def _burst_send(channel, n: int, base: str | None,
-                      ping_first: int = 2,
-                      max_wait: float = 20.0, max_fails: int = 5) -> int:
-    """Envia n mensagens respeitando o rate limit real, SEM travar nunca.
-    - Ping (@everyone) só nas primeiras `ping_first` mensagens: o mention budget
-      do app é finito (~centenas/10min) e exaurido vira 429 com retry gigante.
-    - 429 com retry curto: espera e continua; 429 longo: aborta após 5 falhas/20s.
-    - Loga o erro real no console do runner (flush) pra diagnóstico.
-    Cada mensagem leva o GIF custom ANEXADO (discord.File)."""
+async def _burst_send(channel, n: int, base: str | None) -> int:
+    """MESMO envio da v3.1: payload original (com @everyone em TODAS + URL do GIF
+    no fim), sleep 0.008. Proteção mínima: 429 com retry alarmante (>10s) para
+    o loop (mention budget exaurido) — retry curto espera e continua.
+    Cada msg também leva o GIF strobe anexado. Retorna quantas de fato passaram."""
     ok = 0
-    fails = 0
-    waited = 0.0
-    for i in range(n):
+    for _ in range(n):
         try:
             if base:
-                msg = f"{base}\n\n{SOCIETY_LINE}"
+                msg = f"{base}\n\n{SOCIETY_LINE}\n{GIF_CUSTOM_URLS[0]}"
             else:
-                msg = build_nuke_payload(pings=(i < ping_first))
+                msg = build_nuke_payload()
             await channel.send(msg, allowed_mentions=MENTIONS, file=_gif_file())
             ok += 1
-            fails = 0
-            waited = 0.0
         except discord.HTTPException as e:
-            print(f"[burst] HTTP {e.status} retry_after={getattr(e, 'retry_after', None)}", flush=True)
             if e.status == 429:
                 ra = getattr(e, "retry_after", None) or 1.0
-                fails += 1
-                waited += ra
-                if fails >= max_fails or waited >= max_wait:
+                if ra > 10.0:
                     break
-                await asyncio.sleep(min(ra, 4.0))
+                await asyncio.sleep(ra)
             else:
+                print(f"[burst] HTTP {e.status}", flush=True)
                 break
-        except Exception as ex:
-            print(f"[burst] exceção: {ex!r}", flush=True)
+        except Exception:
             break
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0.008)
     return ok
 
 
 class SpamView(discord.ui.View):
-    """Botão SPAM +10: visible só na mensagem ephemeral de quem rodou o comando.
-    Cada clique manda +10 mensagens no mesmo canal da sessão e atualiza o total."""
+    """Botão SPAM +10: visible só na mensagem ephemeral de quem rodou o comando."""
 
     def __init__(self, target, base: str | None, total: int = 0, timeout: float = 300.0):
         super().__init__(timeout=timeout)
@@ -379,28 +382,11 @@ class SpamView(discord.ui.View):
             pass
 
 
-# ============================ COMANDOS ============================
-@bot.hybrid_command(name="ping", description="Latência e status")
-@install_any
-@ctx_any
-async def ping(ctx):
-    if not await _check_ok(ctx):
-        return
-    t0 = time.time()
-    msg = await ctx.send("pong...")
-    lat = round(bot.latency * 1000, 1)
-    await msg.edit(content=f"🏓 Pong! `{lat}ms` | API `{round((time.time()-t0)*1000,1)}ms`")
-
-
-@bot.hybrid_command(name="spam", description="Flood 2000 chars + GIF + @everyone. /spam [vezes] [texto]")
-@install_any
-@ctx_any
 async def spam(ctx, vezes: int = 20, texto: str = ""):
     if not await _check_ok(ctx):
         return
-    # defer EPHEMERAL: a interação some do canal (não mostra "quem rodou")
     try:
-        await ctx.defer(ephemeral=True)
+        await ctx.defer(ephemeral=True)  # interação some: nada mostra quem rodou
     except Exception:
         pass
     vezes = max(1, min(vezes, 1000))
@@ -410,12 +396,11 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
     view = SpamView(target=target, base=base, total=n, timeout=300)
     try:
         await ctx.followup.send(
-            f"💥 **{n} msgs** enviadas em {target.mention}\n"
-            f"<t:{int(time.time()+300)}:R> pra expirar — spam +10 no botão 👇",
+            f"💥 **{n} msgs** em {target.mention} — spam +10 no botão 👇",
             ephemeral=True, view=view)
     except Exception:
         try:
-            await ctx.send(f"💥 **{n} msgs** em {target.mention}", delete_after=5)
+            await ctx.send(f"✔ {n} msg", delete_after=5)
         except Exception:
             pass
 
@@ -448,16 +433,10 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
     except Exception:
         pass
     if ctx.guild is None:
-        try:
-            await ctx.followup.send("✖ /raid só em servidor. Em grupo/DM usa /spam", ephemeral=True)
-        except Exception:
-            pass
+        await ctx.followup.send("✖ /raid só em servidor. Em grupo/DM usa /spam", ephemeral=True)
         return
     if not ctx.guild.me.guild_permissions.manage_channels:
-        try:
-            await ctx.followup.send("✖ Sem permissão de gerenciar canais", ephemeral=True)
-        except Exception:
-            pass
+        await ctx.followup.send("✖ Sem permissão de gerenciar canais", ephemeral=True)
         return
     canais = max(1, min(canais, 128))
     msgs = max(1, min(msgs, 10))
@@ -471,9 +450,8 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
         except Exception:
             pass
         await asyncio.sleep(0.03)
-    n_sent = 0
     for ch in created:
-        n_sent += await _burst_send(ch, msgs, None)
+        await _burst_send(ch, msgs, None)
         try:
             await ch.send("QUEM VAI CAIR?", poll=_build_poll(
                 "Set Society raid — quem é o próximo?",
@@ -482,7 +460,7 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
             pass
     try:
         await ctx.followup.send(
-            f"💥 **Raid**: {len(created)} canais × {msgs} msg + polls — {n_sent} msgs enviadas",
+            f"💥 **Raid**: {len(created)} canais × {msgs} msg + polls",
             ephemeral=True)
     except Exception:
         pass
