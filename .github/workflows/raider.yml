@@ -2,6 +2,9 @@ name: raider
 
 on:
   workflow_dispatch:
+  schedule:
+    # 24/7: dispara a cada 5h; concurrency cancela o job anterior e sobe novo
+    - cron: '30 */5 * * *'
 
 concurrency:
   group: raider
@@ -10,7 +13,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,6 +23,9 @@ jobs:
         run: |
           pip install --quiet -r requirements.txt
       - name: Roda raider
+        shell: bash
+        run: |
+          # cria o arquivo de token pro nuke_bot (usa env como fonte)
+          python -u nuke_bot.py
         env:
           DISCORD_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: python -u nuke_bot.py

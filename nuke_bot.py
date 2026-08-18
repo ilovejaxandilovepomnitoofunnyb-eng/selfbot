@@ -385,7 +385,7 @@ async def whitelist(ctx, pessoa: discord.User):
     if not _owner_ok(ctx.author.id):
         await ctx.send("✖ Sem permissão", delete_after=3)
         return
-    if _in_bl(pessoa.id):
+    if _blocked(pessoa.id):
         await ctx.send(f"✖ {pessoa.mention} está na blacklist — tira da BL primeiro", delete_after=5)
         return
     lst = _load_list(WHITELIST_FILE)
