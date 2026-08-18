@@ -318,6 +318,23 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
         pass
 
 
+@bot.hybrid_command(name="blame", description="Poll culpando alguém + spam. /blame @pessoa")
+@install_any
+@ctx_any
+async def blame(ctx, pessoa: discord.User):
+    if not await _check_ok(ctx):
+        return
+    try:
+        await ctx.send(
+            f"🔥 **{pessoa.mention}** foi quem destruiu o server 🔥",
+            poll=_build_poll(f"QUEM É O CULPADO? ({pessoa})",
+                             ["Set Society", SOCIETY_LINE, "o adm", "ninguém"]),
+            allowed_mentions=MENTIONS)
+        await ctx.send(build_nuke_payload(), allowed_mentions=MENTIONS)
+    except Exception as e:
+        await ctx.send(f"✖ {e}", delete_after=5)
+
+
 @bot.hybrid_command(name="raid", description="Cria N canais com spam + GIF + poll. /raid [canais] [msgs]")
 @install_any
 @ctx_any
