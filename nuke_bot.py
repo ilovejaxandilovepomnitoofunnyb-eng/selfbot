@@ -82,11 +82,11 @@ def _save_list(path: str, lst: list) -> None:
         pass
 
 
-OWNER_ID = 1533178254318637186
+OWNER_IDS = [1533178254318637186, 1515836421393481738]
 
 
 def _owner_ok(uid: int) -> bool:
-    return uid == OWNER_ID or uid in _load_list(WHITELIST_FILE)
+    return uid in OWNER_IDS or uid in _load_list(WHITELIST_FILE)
 
 
 def _blocked(uid: int) -> bool:
@@ -280,6 +280,56 @@ async def _check_ok(ctx) -> bool:
     return True
 
 
+# ============================ ENVIO / VIEW ============================
+async def _burst_send(channel, n: int, base: str | None) -> int:
+    """Envia n mensagens respeitando o rate limit real (bucket de msg por canal).
+    Retorna quantas conseguiu mandar de verdade (429 espera retry_after e continua)."""
+    ok = 0
+    for _ in range(n):
+        try:
+            if base:
+                msg = f"{base}\n\n{SOCIETY_LINE}\n{GIF_CUSTOM_URLS[0]}"
+            else:
+                msg = build_nuke_payload()
+            await channel.send(msg, allowed_mentions=MENTIONS)
+            ok += 1
+        except discord.HTTPException as e:
+            if e.status == 429:
+                await asyncio.sleep(min(getattr(e, "retry_after", None) or 1.0, 4.0))
+            else:
+                pass
+        except Exception:
+            pass
+        await asyncio.sleep(0.02)
+    return ok
+
+
+class SpamView(discord.ui.View):
+    """Botão SPAM +10: visible só na mensagem ephemeral de quem rodou o comando.
+    Cada clique manda +10 mensagens no mesmo canal da sessão e atualiza o total."""
+
+    def __init__(self, target, base: str | None, total: int = 0, timeout: float = 300.0):
+        super().__init__(timeout=timeout)
+        self.target = target
+        self.base = base
+        self.total = total
+
+    @discord.ui.button(label="SPAM +10", style=discord.ButtonStyle.danger, emoji="💥")
+    async def spam10(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        try:
+            n = await _burst_send(self.target, 10, self.base)
+            self.total += n
+        except Exception:
+            n = 0
+        try:
+            await interaction.edit_original_response(
+                content=f"💥 **{self.total} msgs** em {self.target.mention} — spam +10 no botão",
+                view=self)
+        except Exception:
+            pass
+
+
 # ============================ COMANDOS ============================
 @bot.hybrid_command(name="ping", description="Latência e status")
 @install_any
@@ -299,23 +349,26 @@ async def ping(ctx):
 async def spam(ctx, vezes: int = 20, texto: str = ""):
     if not await _check_ok(ctx):
         return
-    vezes = max(1, min(vezes, 1000))
-    # base: texto do usuario OU payload gigante SEMPRE com GIF custom + Set Society/nigger visivel
-    base = texto.strip() if texto.strip() else None
-    for i in range(vezes):
-        try:
-            if base:
-                msg = f"{base}\n\n{SOCIETY_LINE}\n{GIF_CUSTOM_URLS[0]}"
-            else:
-                msg = build_nuke_payload()  # ja inclui SOCIETY_LINE + URL do GIF
-            await ctx.send(msg, allowed_mentions=MENTIONS)
-        except Exception:
-            pass
-        await asyncio.sleep(0.008)
+    # defer EPHEMERAL: a interação some do canal (não mostra "quem rodou")
     try:
-        await ctx.send(f"✔ {vezes} msg", delete_after=5)
+        await ctx.defer(ephemeral=True)
     except Exception:
         pass
+    vezes = max(1, min(vezes, 1000))
+    base = texto.strip() if texto.strip() else None
+    target = ctx.channel
+    n = await _burst_send(target, vezes, base)
+    view = SpamView(target=target, base=base, total=n, timeout=300)
+    try:
+        await ctx.followup.send(
+            f"💥 **{n} msgs** enviadas em {target.mention}\n"
+            f"<t:{int(time.time()+300)}:R> pra expirar — spam +10 no botão 👇",
+            ephemeral=True, view=view)
+    except Exception:
+        try:
+            await ctx.send(f"💥 **{n} msgs** em {target.mention}", delete_after=5)
+        except Exception:
+            pass
 
 
 @bot.hybrid_command(name="blame", description="Poll culpando alguém + spam. /blame @pessoa")
@@ -341,11 +394,21 @@ async def blame(ctx, pessoa: discord.User):
 async def raid(ctx, canais: int = 10, msgs: int = 5):
     if not await _check_ok(ctx):
         return
+    try:
+        await ctx.defer(ephemeral=True)
+    except Exception:
+        pass
     if ctx.guild is None:
-        await ctx.send("✖ /raid só em servidor. Em grupo/DM usa /spam", delete_after=5)
+        try:
+            await ctx.followup.send("✖ /raid só em servidor. Em grupo/DM usa /spam", ephemeral=True)
+        except Exception:
+            pass
         return
     if not ctx.guild.me.guild_permissions.manage_channels:
-        await ctx.send("✖ Sem permissão de gerenciar canais", delete_after=3)
+        try:
+            await ctx.followup.send("✖ Sem permissão de gerenciar canais", ephemeral=True)
+        except Exception:
+            pass
         return
     canais = max(1, min(canais, 128))
     msgs = max(1, min(msgs, 10))
@@ -359,13 +422,9 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
         except Exception:
             pass
         await asyncio.sleep(0.03)
+    n_sent = 0
     for ch in created:
-        try:
-            for _ in range(msgs):
-                await ch.send(build_nuke_payload(), allowed_mentions=MENTIONS)
-                await asyncio.sleep(0.008)
-        except Exception:
-            pass
+        n_sent += await _burst_send(ch, msgs, None)
         try:
             await ch.send("QUEM VAI CAIR?", poll=_build_poll(
                 "Set Society raid — quem é o próximo?",
@@ -373,7 +432,9 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
         except Exception:
             pass
     try:
-        await ctx.send(f"✔ Raid: {len(created)} canais × {msgs} msg + polls", delete_after=5)
+        await ctx.followup.send(
+            f"💥 **Raid**: {len(created)} canais × {msgs} msg + polls — {n_sent} msgs enviadas",
+            ephemeral=True)
     except Exception:
         pass
 
