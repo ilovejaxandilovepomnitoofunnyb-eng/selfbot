@@ -18,7 +18,8 @@ jobs:
           python-version: '3.12'
       - name: Instala deps
         run: |
-          pip install --quiet discord.py-self Pillow
+          pip install --quiet Pillow
+          pip install --quiet git+https://github.com/dolfies/discord.py-self.git@master
       - name: Roda raider
         env:
           DISCORD_TOKEN: ${{ secrets.BOT_TOKEN }}
