@@ -1,2 +1,2 @@
+discord.py==2.7.1
 Pillow
-git+https://github.com/dolfies/discord.py-self.git@master
