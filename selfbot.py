@@ -125,6 +125,7 @@ if _PROXY_KW:
 
 bot = commands.Bot(command_prefix=PREFIX,
                    user_bot=True, help_command=None,
+                   intents=discord.Intents.all(),
                    **_PROXY_KW)
 
 # ============================ USER-AGENT FIX ============================
