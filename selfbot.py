@@ -90,9 +90,42 @@ def _ensure_opus():
 
 _ensure_opus()
 
+# ============================ PROXY (residente) ============================
+# Se PROXY_URL existir no ambiente, conecta tudo (REST + gateway) através dele.
+# Formato aceito: "http://user:pass@host:port" | "user:pass@host:port" | "host:port"
+PROXY_URL = os.environ.get("PROXY_URL", "").strip()
+
+
+def _proxy_kwargs():
+    if not PROXY_URL:
+        return {}
+    try:
+        import aiohttp
+        u = PROXY_URL
+        if "://" not in u:
+            u = "http://" + u
+        if "@" in u:
+            cred, hostport = u.rsplit("@", 1)
+            scheme = cred.split("://")[0] + "://" if "://" in cred else "http://"
+            user, _, pwd = cred.partition(":")
+            user = user.rsplit("//", 1)[-1]
+            return {
+                "proxy": scheme + hostport,
+                "proxy_auth": aiohttp.BasicAuth(user, pwd),
+            }
+        return {"proxy": u}
+    except Exception as e:
+        print(f"[!] proxy ignorado: {e}", flush=True)
+        return {}
+
+
+_PROXY_KW = _proxy_kwargs()
+if _PROXY_KW:
+    print(f"[+] usando proxy: {_PROXY_KW.get('proxy', PROXY_URL)}", flush=True)
+
 bot = commands.Bot(command_prefix=PREFIX,
-                   intents=discord.Intents.all(),
-                   user_bot=True, help_command=None)
+                   user_bot=True, help_command=None,
+                   **_PROXY_KW)
 
 # ============================ USER-AGENT FIX ============================
 # discord.py oficial 2.7.1 manda UA de BOT -> Discord rejeita token de CONTA
@@ -1179,6 +1212,7 @@ RPC_TIPOS = {
     "streaming": discord.ActivityType.streaming,
     "competing": discord.ActivityType.competing,
     "custom": discord.ActivityType.custom,
+    "echo": discord.ActivityType.listening,
 }
 
 def _parse_flags(texto: str):
@@ -1331,10 +1365,32 @@ def _cover_source(valor: str) -> str:
         return f"https://i.scdn.co/image/{h}" if h else ""
     if "://" in valor:  # URL direta
         return valor
-    # hex puro (32 chars) vira capa do spotify
-    if len(valor) == 32 and all(c in "0123456789abcdefABCDEF" for c in valor):
+    # hex puro (32/40/64 chars) vira capa do spotify
+    if len(valor) in (32, 40, 64) and all(c in "0123456789abcdefABCDEF" for c in valor):
         return f"https://i.scdn.co/image/{valor}"
     return ""
+
+def _rpc_ws():
+    try:
+        return bot._connection.ws
+    except Exception:
+        return None
+
+
+async def _presence_raw(act: dict):
+    """Envia opcode 3 (presence update) pelo gateway — bypass da lib antiga
+    do venv, que serializa buttons como string (payload inválido no Discord)."""
+    ws = _rpc_ws()
+    if ws is None:
+        raise RuntimeError("gateway desconectado")
+    if act is None:
+        await ws.send_as_json({"op": 3, "d": {"since": 0, "activities": [],
+                                              "status": "online", "afk": False}})
+        return
+    await ws.send_as_json({
+        "op": 3,
+        "d": {"since": 0, "activities": [act], "status": "online", "afk": False},
+    })
 
 @bot.command(name="rpc")
 async def rpc(ctx, tipo: str = None, *, texto: str = None):
@@ -1392,30 +1448,33 @@ async def rpc(ctx, tipo: str = None, *, texto: str = None):
         cover_url = _cover_source(flags.get("cover", "") or flags.get("img", ""))
         if not cover_url and "url" in flags:
             cover_url = _cover_source(flags["url"])
-        if not cover_url:
-            cover_url = ""
         btn_label = flags.get("btn1", "Play on Echo").split("|")[0]
         btn_url = (flags.get("btn1", "|").split("|")[1]
                    if "|" in flags.get("btn1", "") else
                    flags.get("url") or "https://open.spotify.com/")
-        act = discord.Activity(
-            type=discord.ActivityType.listening,
-            name="Echo",
-            application_id=int(ECHO_APP_ID),
-            details=flags.get("details") or nome_limpo,
-            state=flags.get("state") or flags.get("artist"),
-            assets={
+        # payload RAW (dict) — a lib do venv estraga buttons no to_dict
+        act = {
+            "name": "Echo",
+            "type": 2,
+            "application_id": ECHO_APP_ID,
+            "details": flags.get("details") or nome_limpo,
+            "state": flags.get("state") or flags.get("artist"),
+            "assets": {
                 "large_image": _mp_external(cover_url) if cover_url else _mp_external(ECHO_PAUSE_PNG),
                 "small_image": _mp_external(ECHO_PLAY_GIF),
                 "small_text": "Echo",
             },
-            buttons=[{"label": btn_label[:32], "url": btn_url[:256]}],
-        )
+            "buttons": [{"label": btn_label[:32], "url": btn_url[:256]}],
+            "timestamps": {"start": int(time.time() * 1000)},
+        }
     else:
         nome_limpo, flags = _parse_flags(texto)
         act = _mount_activity(tipo, nome_limpo, flags)
     try:
-        await bot.change_presence(activity=act, status=discord.Status.online)
+        if isinstance(act, dict):
+            await _presence_raw(act)
+        else:
+            await bot.change_presence(activity=act, status=discord.Status.online)
         resumo = f"presença: {tipo} '{nome_limpo}'"
         if flags.get("details"):
             resumo += f" | details: {flags['details']}"

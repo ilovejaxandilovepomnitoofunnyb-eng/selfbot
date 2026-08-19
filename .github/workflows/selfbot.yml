@@ -25,4 +25,5 @@ jobs:
           ALT_TOKEN: ${{ secrets.ALT_TOKEN }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
         run: python -u selfbot.py
