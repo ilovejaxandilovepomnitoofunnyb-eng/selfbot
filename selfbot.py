@@ -1266,6 +1266,56 @@ def _mount_activity(tipo: str, nome: str, flags: dict):
             pass
     return discord.Activity(**kwargs)
 
+def _spotify_cover_hex(url: str) -> str:
+    """Extrai o hex da capa do álbum via oembed do Spotify (sem auth).
+    Retorna '' se falhar. Ex: https://open.spotify.com/track/<ID>"""
+    try:
+        import urllib.request, urllib.parse, json as _json
+        o = "https://open.spotify.com/oembed?url=" + urllib.parse.quote(url, safe="")
+        with urllib.request.urlopen(o, timeout=6) as r:
+            d = _json.loads(r.read().decode())
+        t = d.get("thumbnail_url", "")  # https://i.scdn.co/image/<hex>
+        if not t:
+            return ""
+        h = t.rstrip("/").rsplit("/", 1)[-1]
+        return h if h else ""
+    except Exception:
+        return ""
+
+
+# --- Echo RPC fake: app_id REAL do Echo (open source) ---
+ECHO_APP_ID = "1135077904435396718"
+ECHO_PLAY_GIF = "https://files.catbox.moe/7ajka9.gif"
+ECHO_PAUSE_PNG = "https://files.catbox.moe/8hopuj.png"
+
+
+def _b64u(s: str) -> str:
+    """base64 url-safe sem padding (formato mp:external do Discord)."""
+    import base64
+    return base64.urlsafe_b64encode(s.encode()).decode().rstrip("=")
+
+
+def _mp_external(url: str) -> str:
+    """Converte qualquer http(s) num asset mp:external aceito pelo client."""
+    return "mp:external/" + _b64u(url)
+
+
+def _cover_source(valor: str) -> str:
+    """Aceita: link Spotify (extrai capa), hex de capa, ou URL de imagem direta.
+    Retorna a URL http(s) da capa ou ''."""
+    valor = valor.strip()
+    if not valor:
+        return ""
+    if "open.spotify.com" in valor:
+        h = _spotify_cover_hex(valor)
+        return f"https://i.scdn.co/image/{h}" if h else ""
+    if "://" in valor:  # URL direta
+        return valor
+    # hex puro (32 chars) vira capa do spotify
+    if len(valor) == 32 and all(c in "0123456789abcdefABCDEF" for c in valor):
+        return f"https://i.scdn.co/image/{valor}"
+    return ""
+
 @bot.command(name="rpc")
 async def rpc(ctx, tipo: str = None, *, texto: str = None):
     """Define presença completa (RPC via gateway).
@@ -1315,6 +1365,32 @@ async def rpc(ctx, tipo: str = None, *, texto: str = None):
             details=flags.get("details"),
             state=flags.get("state"),
         )
+    elif tipo == "echo":
+        # Fake de rádio usando o application_id REAL do Echo (open source).
+        # Aparece como "Listening to Echo" com capa (mp:external) + ícone + botão.
+        nome_limpo, flags = _parse_flags(texto)
+        cover_url = _cover_source(flags.get("cover", "") or flags.get("img", ""))
+        if not cover_url and "url" in flags:
+            cover_url = _cover_source(flags["url"])
+        if not cover_url:
+            cover_url = ""
+        btn_label = flags.get("btn1", "Play on Echo").split("|")[0]
+        btn_url = (flags.get("btn1", "|").split("|")[1]
+                   if "|" in flags.get("btn1", "") else
+                   flags.get("url") or "https://open.spotify.com/")
+        act = discord.Activity(
+            type=discord.ActivityType.listening,
+            name="Echo",
+            application_id=int(ECHO_APP_ID),
+            details=flags.get("details") or nome_limpo,
+            state=flags.get("state") or flags.get("artist"),
+            assets={
+                "large_image": _mp_external(cover_url) if cover_url else _mp_external(ECHO_PAUSE_PNG),
+                "small_image": _mp_external(ECHO_PLAY_GIF),
+                "small_text": "Echo",
+            },
+            buttons=[{"label": btn_label[:32], "url": btn_url[:256]}],
+        )
     else:
         nome_limpo, flags = _parse_flags(texto)
         act = _mount_activity(tipo, nome_limpo, flags)
@@ -1334,7 +1410,7 @@ async def rpc(ctx, tipo: str = None, *, texto: str = None):
         if "party" in flags:
             resumo += f" | party: {flags['party']}"
         await ctx.send(f"`{resumo}`", delete_after=4)
-        if tipo not in ("custom", "streaming") and "app" not in flags:
+        if tipo not in ("custom", "streaming", "echo") and "app" not in flags:
             await ctx.send(
                 "`⚠ rich presence de conta de usuário só renderiza com --app <id> "
                 "(cria app em discord.com/developers e usa o Application ID)`",
