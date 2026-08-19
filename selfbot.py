@@ -125,6 +125,34 @@ _PROXY_KW = _proxy_kwargs()
 if _PROXY_KW:
     print(f"[+] usando proxy: {_PROXY_KW.get('proxy', PROXY_URL)}", flush=True)
 
+# ============================ PROBE (debug) ============================
+# Verifica ANTES do login: IP de saída + status do /users/@me via aiohttp
+# puro com o MESMO proxy. Isola se o 401 vem do proxy/IP ou do discord.py.
+if _PROXY_KW and os.environ.get("SELFBOT_PROBE"):
+    import asyncio
+    import aiohttp as _aiohttp
+
+    async def _probe():
+        tok = os.environ.get("DISCORD_TOKEN", "")
+        async with _aiohttp.ClientSession() as s:
+            try:
+                async with s.get("https://api.ipify.org", timeout=10, **_PROXY_KW) as r:
+                    ip = (await r.text()).strip()
+            except Exception as e:
+                ip = "ERRO: %s" % e
+            try:
+                async with s.get(
+                    "https://discord.com/api/v10/users/@me",
+                    headers={"Authorization": tok},
+                    timeout=10, **_PROXY_KW,
+                ) as r:
+                    body = await r.text()
+                    print(f"[probe] ip_saida={ip} | login_status={r.status} | body={body[:140]}", flush=True)
+            except Exception as e:
+                print(f"[probe] ip_saida={ip} | ERRO login: {e}", flush=True)
+
+    asyncio.run(_probe())
+
 bot = commands.Bot(command_prefix=PREFIX,
                    user_bot=True, help_command=None,
                    intents=discord.Intents.all(),
