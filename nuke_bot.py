@@ -28,7 +28,7 @@ from discord.ext import commands
 from discord import app_commands
 
 # ============================ CONFIG ============================
-PREFIX = "!"
+PREFIX = "."
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WHITELIST_FILE = os.path.join(BASE_DIR, "wl.json")
 BLACKLIST_FILE = os.path.join(BASE_DIR, "bl.json")
