@@ -26,4 +26,5 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
+          SELFBOT_PROBE: "1"
         run: python -u selfbot.py
