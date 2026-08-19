@@ -91,6 +91,7 @@ def _ensure_opus():
 _ensure_opus()
 
 bot = commands.Bot(command_prefix=PREFIX,
+                   intents=discord.Intents.all(),
                    user_bot=True, help_command=None)
 
 # ============================ DEVICE SPOOF (pc/celular/vr/web/console) ============================
