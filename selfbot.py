@@ -94,6 +94,26 @@ bot = commands.Bot(command_prefix=PREFIX,
                    intents=discord.Intents.all(),
                    user_bot=True, help_command=None)
 
+# ============================ USER-AGENT FIX ============================
+# discord.py oficial 2.7.1 manda UA de BOT -> Discord rejeita token de CONTA
+# de usuário com 401. Monkeypatch: força o UA do discord.py-self (aceito pra
+# user token, validado em /users/@me).
+try:
+    import discord.http as _dhttp
+    _orig_http_init = _dhttp.HTTPClient.__init__
+
+    def _patched_http_init(self, *a, **k):
+        _orig_http_init(self, *a, **k)
+        self.user_agent = (
+            "DiscordBot (https://github.com/discord/discord.py-self, 2.7.1) "
+            f"Python/{sys.version_info[0]}.{sys.version_info[1]} aiohttp/3.11.7"
+        )
+
+    _dhttp.HTTPClient.__init__ = _patched_http_init
+    print("[+] user-agent forçado p/ discord.py-self (user token ok)")
+except Exception as e:
+    print(f"[!] user-agent patch falhou: {e}")
+
 # ============================ DEVICE SPOOF (pc/celular/vr/web/console) ============================
 # O Discord mostra a plataforma pelas properties do IDENTIFY:
 #   $os / $browser / $device
