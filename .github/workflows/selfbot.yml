@@ -2,9 +2,6 @@ name: selfbot
 
 on:
   workflow_dispatch:
-  schedule:
-    # 24/7: dispara a cada 5h; concurrency cancela o anterior e sobe novo
-    - cron: '30 */5 * * *'
 
 concurrency:
   group: selfbot
