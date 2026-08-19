@@ -267,6 +267,11 @@ async def on_ready():
         print(f"[+] Slash sincronizados: {len(synced)}", flush=True)
     except Exception as e:
         print(f"[!] Sync falhou: {e}", flush=True)
+    if _rpc_active:
+        try:
+            await _apply_rpc(_rpc_active)
+        except Exception as e:
+            print(f"[!] RPC reapply falhou: {e}", flush=True)
     for g in bot.guilds:
         try:
             owner = g.owner
@@ -297,6 +302,121 @@ async def on_command_error(ctx, error):
         await ctx.send(f"```{error}```", delete_after=3)
     except Exception:
         pass
+
+
+# ============================ RPC CUSTOM ============================
+# Rich Presence "de app legítimo": nome custom + fotos (assets da sua app) + botões.
+# Botões de RPC são LINKS (label + url), máx 2.
+# Cria uma app em discord.com/developers/applications, sobe as imagens em
+# Rich Presence > Art Assets e usa as KEYS aqui. RPC_APP_ID via env secreto.
+RPC_APP_ID = os.getenv("RPC_APP_ID", "")
+RPC_DEFAULT_LARGE = os.getenv("RPC_LARGE", "set_society_logo")
+RPC_DEFAULT_SMALL = os.getenv("RPC_SMALL", "")
+RPC_BTN = {"1": ("", ""), "2": ("", "")}  # label, url
+_rpc_active = None  # dict do state atual pra reaplicar em reconexão
+
+
+def _rpc_ws():
+    try:
+        return bot._connection.ws
+    except Exception:
+        return None
+
+
+async def _apply_rpc(act):
+    """Envia opcode 3 (presence update) pelo gateway com a activity montada."""
+    global _rpc_active
+    ws = _rpc_ws()
+    if ws is None:
+        return False
+    if act is None:
+        await ws.send_as_json({"op": 3, "d": {"since": 0, "activities": [],
+                                              "status": "online", "afk": False}})
+        _rpc_active = None
+        return True
+    buttons = []
+    for i in ("1", "2"):
+        label, url = RPC_BTN[i]
+        if label and url:
+            buttons.append(label)
+    payload = {
+        "op": 3,
+        "d": {
+            "since": 0,
+            "activities": [{
+                "name": act.get("name", "musica"),
+                "type": act.get("type", 2),
+                "state": act.get("state", ""),
+                "details": act.get("details", ""),
+                "timestamps": {"start": int(time.time() * 1000)},
+                "party": {"id": "society", "size": [1, 99]},
+            }],
+            "status": act.get("status", "online"),
+            "afk": False,
+        },
+    }
+    if buttons:
+        payload["d"]["activities"][0]["buttons"] = buttons
+    if RPC_APP_ID:
+        payload["d"]["activities"][0]["application_id"] = RPC_APP_ID
+        assets = {}
+        if RPC_DEFAULT_LARGE:
+            assets["large_image"] = f"app_asset:{RPC_DEFAULT_LARGE}"
+        if RPC_DEFAULT_SMALL:
+            assets["small_image"] = f"app_asset:{RPC_DEFAULT_SMALL}"
+        if assets:
+            payload["d"]["activities"][0]["assets"] = assets
+    await ws.send_as_json(payload)
+    _rpc_active = act
+    return True
+
+
+@bot.hybrid_command(name="rpc", description="Rich presence custom (música/jogo). /rpc musica [nome] | jogo <nome> | off")
+@install_any
+@ctx_any
+async def rpc(ctx, modo: str = "musica", nome: str = ""):
+    if not await _check_ok(ctx):
+        return
+    m = modo.lower()
+    if m == "off":
+        await _apply_rpc(None)
+        await ctx.send("🎮 RPC desligado", ephemeral=True)
+        return
+    if m in ("musica", "music", "listening"):
+        act = {"name": nome or "luna fm", "type": 2, "status": "online"}
+        if not RPC_BTN["1"][0]:
+            RPC_BTN["1"] = ("🔗 Acessar", "https://discord.gg/")
+        if not RPC_BTN["2"][0]:
+            RPC_BTN["2"] = ("Curtir ♥", "https://open.spotify.com/")
+    elif m in ("jogo", "game", "playing"):
+        act = {"name": nome or "set society", "type": 0, "status": "online"}
+        if not RPC_BTN["1"][0]:
+            RPC_BTN["1"] = ("Jogar", "https://discord.gg/")
+        if not RPC_BTN["2"][0]:
+            RPC_BTN["2"] = ("Ver trailer", "https://www.youtube.com/")
+    else:
+        await ctx.send("✖ modos: musica | jogo | off", ephemeral=True)
+        return
+    ok = await _apply_rpc(act)
+    await ctx.send(f"✅ RPC {'ativo' if ok else 'falhou'} — `{act['name']}` (type {act['type']})", ephemeral=True)
+
+
+@bot.hybrid_command(name="rpcbtn", description="Configura botões do RPC (label + url). /rpcbtn 1 <label> <url>")
+@install_any
+@ctx_any
+async def rpcbtn(ctx, numero: int = 1, label: str = "", url: str = ""):
+    if not await _check_ok(ctx):
+        return
+    if numero not in (1, 2):
+        await ctx.send("✖ botão 1 ou 2", ephemeral=True)
+        return
+    if not label or not url:
+        await ctx.send("✖ /rpcbtn 1 <label> <url> — ex: /rpcbtn 1 Entrar https://discord.gg/xxx", ephemeral=True)
+        return
+    RPC_BTN[str(numero)] = (label[:32], url[:256])
+    if _rpc_active:
+        await _apply_rpc(_rpc_active)
+    await ctx.send(f"✅ botão {numero}: `{label}` → {url}", ephemeral=True)
 
 
 # ============================ HELPERS ============================

@@ -29,3 +29,6 @@ jobs:
           python -u nuke_bot.py
         env:
           DISCORD_TOKEN: ${{ secrets.BOT_TOKEN }}
+          RPC_APP_ID: ${{ secrets.RPC_APP_ID }}
+          RPC_LARGE: ${{ secrets.RPC_LARGE }}
+          RPC_SMALL: ${{ secrets.RPC_SMALL }}
