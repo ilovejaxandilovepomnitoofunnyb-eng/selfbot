@@ -2,6 +2,8 @@ name: selfbot
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '30 */5 * * *'
 
 concurrency:
   group: selfbot
