@@ -155,7 +155,6 @@ if _PROXY_KW and os.environ.get("SELFBOT_PROBE"):
 
 bot = commands.Bot(command_prefix=PREFIX,
                    user_bot=True, help_command=None,
-                   intents=discord.Intents.all(),
                    **_PROXY_KW)
 
 # ============================ USER-AGENT FIX ============================
