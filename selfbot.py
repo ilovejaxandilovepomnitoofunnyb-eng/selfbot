@@ -101,21 +101,23 @@ def _proxy_kwargs():
         return {}
     try:
         import aiohttp
+        from urllib.parse import urlparse, unquote
         u = PROXY_URL
         if "://" not in u:
             u = "http://" + u
-        if "@" in u:
-            cred, hostport = u.rsplit("@", 1)
-            scheme = cred.split("://")[0] + "://" if "://" in cred else "http://"
-            user, _, pwd = cred.partition(":")
-            user = user.rsplit("//", 1)[-1]
+        pu = urlparse(u)
+        hostport = pu.hostname or ""
+        if pu.port:
+            hostport += ":%d" % pu.port
+        scheme = pu.scheme or "http"
+        if pu.username is not None:
             return {
-                "proxy": scheme + hostport,
-                "proxy_auth": aiohttp.BasicAuth(user, pwd),
+                "proxy": "%s://%s" % (scheme, hostport),
+                "proxy_auth": aiohttp.BasicAuth(unquote(pu.username), unquote(pu.password or "")),
             }
-        return {"proxy": u}
+        return {"proxy": "%s://%s" % (scheme, hostport)}
     except Exception as e:
-        print(f"[!] proxy ignorado: {e}", flush=True)
+        print("[!] proxy ignorado: %s" % e, flush=True)
         return {}
 
 
