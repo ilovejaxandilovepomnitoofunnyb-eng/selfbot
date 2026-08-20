@@ -1511,6 +1511,41 @@ async def m_nuke(ctx, canal: discord.TextChannel = None):
         await ctx.send(f"`nuke falhou: {e}`", delete_after=5)
 
 
+
+def _git_push_config(caminhos=("autorole.json",)):
+    """Tenta commitar configs de volta no repo p/ persistencia entre runs."""
+    try:
+        gt = os.environ.get("GIT_TOKEN")
+        repo = os.environ.get("REPO")
+        if not gt or not repo:
+            return False
+        import subprocess
+        base = "/home/runner/work"
+        # encontra o dir do repo clonado
+        for root in (f"/home/runner/work/{repo.split('/')[-1]}", "/home/runner/work"):
+            if os.path.isdir(root):
+                parts = root.split("/")
+                work = "/home/runner/work/" + (parts[-1] if parts[-1] else "")
+                for d in os.listdir(work) if os.path.isdir(work) else []:
+                    cand = os.path.join(work, d)
+                    if os.path.isdir(os.path.join(cand, ".git")):
+                        base = cand
+                        break
+                break
+        if not os.path.isdir(os.path.join(base, ".git")):
+            return False
+        url = f"https://x-access-token:{gt}@github.com/{repo}.git"
+        subprocess.run(["git", "config", "user.email", "jax@bot.local"], cwd=base, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Jax Bot"], cwd=base, capture_output=True)
+        subprocess.run(["git", "add", "-A", "--", *caminhos], cwd=base, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "config: autorole/wl/bl atualizados pelo bot", cwd=base, capture_output=True])
+        subprocess.run(["git", "remote", "set-url", "origin", url], cwd=base, capture_output=True)
+        r = subprocess.run(["git", "push", "origin", "HEAD"], cwd=base, capture_output=True, timeout=30)
+        return r.returncode == 0
+    except Exception as e:
+        print(f"[gitcfg] {e}", flush=True)
+        return False
+
 # ============================ AUTO-ROLE ============================
 AUTOROLE_FILE = "autorole.json"
 # fallback se nao tiver config: {guild_id: role_id}
@@ -1544,6 +1579,7 @@ async def m_setautorole(ctx, cargo: discord.Role = None):
         return
     _autorole_cache[str(ctx.guild.id)] = cargo.id
     _autorole_save()
+    _git_push_config()
     await _log_mod(ctx.guild, f"autorole: novo membro ganha {cargo.name} (set por {ctx.author})")
     await ctx.send(f"`autorole -> {cargo.name}`", delete_after=10)
 
@@ -1556,6 +1592,7 @@ async def m_delautorole(ctx):
     if str(ctx.guild.id) in _autorole_cache:
         del _autorole_cache[str(ctx.guild.id)]
         _autorole_save()
+        _git_push_config()
     await ctx.send("`autorole removido`", delete_after=10)
 
 
