@@ -1689,9 +1689,13 @@ def _welcome_load():
     global _welcome_cache
     try:
         with open(WELCOME_FILE, "r", encoding="utf-8") as f:
-            _welcome_cache = json.loads(f.read())
+            data = json.loads(f.read())
+        _welcome_cache = {
+            str(k): (v if isinstance(v, dict) else {"channel": int(v), "text": None})
+            for k, v in data.items()
+        }
     except Exception:
-        _welcome_cache = dict(WELCOME_DEFAULT)
+        _welcome_cache = {str(g): {"channel": c, "text": None} for g, c in WELCOME_DEFAULT.items()}
 
 
 def _welcome_save():
@@ -1699,22 +1703,25 @@ def _welcome_save():
         f.write(json.dumps(_welcome_cache))
 
 
-def _welcome_embed(member):
-    desc = f"salve {member.mention}!"
-    if member.guild.rules_channel is not None:
-        desc += f"\nle as regras em {member.guild.rules_channel.mention}"
-    return discord.Embed(title="bem-vindo", description=desc, color=0x2C2F33)
+def _welcome_embed(member, text=None):
+    if not text:
+        text = f"salve {member.mention}!"
+        if member.guild.rules_channel is not None:
+            text += f"\nle as regras em {member.guild.rules_channel.mention}"
+    else:
+        text = text.replace("{user}", member.mention)
+    return discord.Embed(title="bem-vindo", description=text[:2000], color=0x2C2F33)
 
 
 async def _send_welcome(member):
     _welcome_load()
-    cid = _welcome_cache.get(str(member.guild.id))
-    if not cid:
+    cfg = _welcome_cache.get(str(member.guild.id))
+    if not cfg:
         return False
-    ch = member.guild.get_channel(int(cid))
+    ch = member.guild.get_channel(int(cfg.get("channel", 0)))
     if ch is None:
         return False
-    await ch.send(embed=_welcome_embed(member))
+    await ch.send(embed=_welcome_embed(member, cfg.get("text")))
     return True
 
 
@@ -1725,14 +1732,50 @@ async def m_setwelcome(ctx, canal: discord.TextChannel = None):
     _welcome_load()
     if canal is None:
         atual = _welcome_cache.get(str(ctx.guild.id))
-        c = ctx.guild.get_channel(int(atual)) if atual else None
-        await ctx.send(f"`welcome -> #{c.name if c else 'nenhum'}`", delete_after=10)
+        c = None
+        tx = None
+        if isinstance(atual, dict):
+            c = ctx.guild.get_channel(int(atual.get("channel", 0))) if atual.get("channel") else None
+            tx = atual.get("text")
+        elif atual:
+            c = ctx.guild.get_channel(int(atual))
+        msg = f"`welcome -> #{c.name if c else 'nenhum'}`"
+        if tx:
+            msg += f"\n`texto: {tx[:100]}`"
+        await ctx.send(msg, delete_after=10)
         return
-    _welcome_cache[str(ctx.guild.id)] = canal.id
+    atual = _welcome_cache.get(str(ctx.guild.id), {})
+    _welcome_cache[str(ctx.guild.id)] = {"channel": canal.id, "text": atual.get("text") if isinstance(atual, dict) else None}
     _welcome_save()
     _git_push_config(("welcome.json",))
     await _log_mod(ctx.guild, f"welcome: novas entradas vao p/ #{canal.name} (set por {ctx.author})")
     await ctx.send(f"`welcome -> #{canal.name}`", delete_after=10)
+
+
+@bot.command(name="welcometext")
+async def m_welcometext(ctx, *, texto: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    _welcome_load()
+    atual = _welcome_cache.get(str(ctx.guild.id), {})
+    if not isinstance(atual, dict):
+        atual = {"channel": int(atual) if atual else 0, "text": None}
+    if texto is None or texto.strip().lower() == "reset":
+        nv = None if (texto and texto.strip().lower() == "reset") else atual.get("text")
+        _welcome_cache[str(ctx.guild.id)] = {"channel": atual.get("channel", 0), "text": nv}
+        _welcome_save()
+        _git_push_config(("welcome.json",))
+        if texto and texto.strip().lower() == "reset":
+            await ctx.send("`texto do welcome voltou ao padrao`", delete_after=10)
+        else:
+            cur = atual.get("text") or "padrao"
+            await ctx.send(f"`texto atual: {cur[:200]}`", delete_after=None)
+        return
+    _welcome_cache[str(ctx.guild.id)] = {"channel": atual.get("channel", 0), "text": texto}
+    _welcome_save()
+    _git_push_config(("welcome.json",))
+    await _log_mod(ctx.guild, f"welcome: texto alterado por {ctx.author}")
+    await ctx.send("`texto do welcome atualizado`", delete_after=10)
 
 
 @bot.command(name="delwelcome")
