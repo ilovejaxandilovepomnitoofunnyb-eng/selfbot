@@ -1613,6 +1613,10 @@ async def on_member_join(member):
                 await _log_mod(member.guild, f"autore: {member} entrou e levou {role.name}")
     except Exception as e:
         print(f"[autore] falha: {e}", flush=True)
+    try:
+        await _send_welcome(member)
+    except Exception as e:
+        print(f"[welcome] falha: {e}", flush=True)
 
 def _get_autorole(guild):
     _autorole_load()
@@ -1672,6 +1676,84 @@ async def _autorole_loop():
         await asyncio.sleep(300)
 
 
+
+
+# ============================ WELCOME ============================
+WELCOME_FILE = "welcome.json"
+# fallback: {guild_id: canal_id} -> set society usa o geral
+WELCOME_DEFAULT = {1539791937291419650: 1539797820180140183}
+_welcome_cache = dict(WELCOME_DEFAULT)
+
+
+def _welcome_load():
+    global _welcome_cache
+    try:
+        with open(WELCOME_FILE, "r", encoding="utf-8") as f:
+            _welcome_cache = json.loads(f.read())
+    except Exception:
+        _welcome_cache = dict(WELCOME_DEFAULT)
+
+
+def _welcome_save():
+    with open(WELCOME_FILE, "w", encoding="utf-8") as f:
+        f.write(json.dumps(_welcome_cache))
+
+
+def _welcome_embed(member):
+    desc = f"salve {member.mention}!"
+    if member.guild.rules_channel is not None:
+        desc += f"\nle as regras em {member.guild.rules_channel.mention}"
+    return discord.Embed(title="bem-vindo", description=desc, color=0x2C2F33)
+
+
+async def _send_welcome(member):
+    _welcome_load()
+    cid = _welcome_cache.get(str(member.guild.id))
+    if not cid:
+        return False
+    ch = member.guild.get_channel(int(cid))
+    if ch is None:
+        return False
+    await ch.send(embed=_welcome_embed(member))
+    return True
+
+
+@bot.command(name="setwelcome")
+async def m_setwelcome(ctx, canal: discord.TextChannel = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    _welcome_load()
+    if canal is None:
+        atual = _welcome_cache.get(str(ctx.guild.id))
+        c = ctx.guild.get_channel(int(atual)) if atual else None
+        await ctx.send(f"`welcome -> #{c.name if c else 'nenhum'}`", delete_after=10)
+        return
+    _welcome_cache[str(ctx.guild.id)] = canal.id
+    _welcome_save()
+    _git_push_config(("welcome.json",))
+    await _log_mod(ctx.guild, f"welcome: novas entradas vao p/ #{canal.name} (set por {ctx.author})")
+    await ctx.send(f"`welcome -> #{canal.name}`", delete_after=10)
+
+
+@bot.command(name="delwelcome")
+async def m_delwelcome(ctx):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    _welcome_load()
+    if str(ctx.guild.id) in _welcome_cache:
+        del _welcome_cache[str(ctx.guild.id)]
+        _welcome_save()
+        _git_push_config(("welcome.json",))
+    await ctx.send("`welcome removido`", delete_after=10)
+
+
+@bot.command(name="testwelcome")
+async def m_testwelcome(ctx, alvo: discord.Member = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    alvo = alvo or ctx.author
+    ok = await _send_welcome(alvo)
+    await ctx.send("`welcome enviado`" if ok else "`welcome nao configurado`", delete_after=5)
 
 # ============================ MAIN ============================
 if __name__ == "__main__":
