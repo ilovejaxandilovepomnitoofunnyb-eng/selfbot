@@ -771,7 +771,7 @@ async def m_mute(ctx, alvo: discord.Member, *, resto: str = None):
     elif len(alvo.roles) > 0:
         pass
     try:
-        await alvo.timeout(int(minutos * 60), reason="mute " + (motivo or ""))
+        await alvo.edit(timeout=datetime.timedelta(minutes=minutos), reason="mute " + (motivo or ""))
         await _log_mod(ctx.guild, f"mute: {alvo} ({alvo.id}) {minutos}min por {ctx.author} [{motivo or 'sem motivo'}]")
         await ctx.send(f"`mute {alvo} {minutos}min - {motivo or 'sem motivo'}`", delete_after=5)
     except Exception as e:
@@ -783,7 +783,7 @@ async def m_unmute(ctx, alvo: discord.Member):
     if not await _check_ok(ctx) or ctx.guild is None:
         return
     try:
-        await alvo.timeout(0, reason="unmute")
+        await alvo.edit(timeout=None, reason="unmute")
         await _log_mod(ctx.guild, f"unmute: {alvo} ({alvo.id}) por {ctx.author}")
         await ctx.send(f"`unmute {alvo}`", delete_after=5)
     except Exception as e:
