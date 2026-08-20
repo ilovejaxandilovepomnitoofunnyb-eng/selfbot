@@ -755,9 +755,21 @@ async def m_softban(ctx, alvo: discord.Member, *, motivo: str = None):
 
 
 @bot.command(name="mute")
-async def m_mute(ctx, alvo: discord.Member, minutos: float = 10, *, motivo: str = None):
+async def m_mute(ctx, alvo: discord.Member, *, resto: str = None):
     if not await _check_ok(ctx) or ctx.guild is None:
         return
+    minutos = 10
+    motivo = None
+    if resto:
+        partes = resto.strip().split(maxsplit=1)
+        try:
+            minutos = float(partes[0].replace(",", "."))
+            if len(partes) > 1:
+                motivo = partes[1]
+        except ValueError:
+            motivo = resto.strip()
+    elif len(alvo.roles) > 0:
+        pass
     try:
         await alvo.timeout(int(minutos * 60), reason="mute " + (motivo or ""))
         await _log_mod(ctx.guild, f"mute: {alvo} ({alvo.id}) {minutos}min por {ctx.author} [{motivo or 'sem motivo'}]")
