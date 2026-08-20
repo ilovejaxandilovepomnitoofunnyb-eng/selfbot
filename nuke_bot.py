@@ -324,6 +324,10 @@ async def on_message(msg):
         return
     if _blocked(msg.author.id):
         return
+    try:
+        await _spam_check(msg)
+    except Exception as e:
+        print(f"[antispam] erro: {e}", flush=True)
     await bot.process_commands(msg)
 
 
@@ -670,6 +674,182 @@ async def blacklist(ctx, pessoa: discord.User):
 
 
 # ============================ HELP ============================
+
+
+# ============================ ANTI-NUKE / ANTI-RAID / ANTI-SPAM ============================
+ANTI_FILE = os.path.join(BASE_DIR, "anti.json")
+ANTI_DEFAULT = {1539791937291419650: {"nuke": True, "spam": True}}
+_anti_cache = dict(ANTI_DEFAULT)
+_action_log = {}  # (user_id, tipo) -> [timestamps]
+_msg_log = {}     # (user_id, texto) -> [timestamps]
+
+
+def _anti_load():
+    global _anti_cache
+    try:
+        with open(ANTI_FILE, "r", encoding="utf-8") as f:
+            _anti_cache = json.loads(f.read())
+    except Exception:
+        _anti_cache = dict(ANTI_DEFAULT)
+
+
+def _anti_save():
+    with open(ANTI_FILE, "w", encoding="utf-8") as f:
+        f.write(json.dumps(_anti_cache))
+
+
+def _anti_on(guild, feat):
+    _anti_load()
+    cfg = _anti_cache.get(str(guild.id))
+    return bool(cfg and cfg.get(feat))
+
+
+def _anti_member_protect(member):
+    """owner/whitelist/bots nunca sao punidos pelo anti."""
+    if member is None or member.bot:
+        return True
+    return member.id in OWNER_IDS or member.id in _load_list(WHITELIST_FILE)
+
+
+def _anti_rate(uid, tipo, janela, limite):
+    now = time.time()
+    lst = [t for t in _action_log.get((uid, tipo), []) if now - t < janela]
+    lst.append(now)
+    _action_log[(uid, tipo)] = lst
+    return len(lst) > limite
+
+
+async def _punish(member, motivo, modo="mute"):
+    if _anti_member_protect(member):
+        return
+    await _log_mod(member.guild, f"ANTINUKE: {member} ({member.id}) -> {motivo} [{modo}]")
+    try:
+        if modo == "ban":
+            await member.guild.ban(member, reason="antinuke: " + motivo)
+        else:
+            await member.timeout(datetime.timedelta(minutes=60), reason="antinuke: " + motivo)
+    except Exception as e:
+        print(f"[anti] punish falhou {member}: {e}", flush=True)
+
+
+async def _spam_check(msg):
+    if msg.guild is None or not _anti_on(msg.guild, "spam"):
+        return
+    if _anti_member_protect(msg.author):
+        return
+    now = time.time()
+    # repeticao: 5 mensagens identicas em 20s
+    k1 = (msg.author.id, msg.content)
+    l1 = [t for t in _msg_log.get(k1, []) if now - t < 20]
+    l1.append(now)
+    _msg_log[k1] = l1
+    if len(l1) >= 5:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        await _punish(msg.author, "spam repetido", "mute")
+        return
+    # flood: 8 mensagens em 5s
+    k2 = (msg.author.id, "*flood*")
+    l2 = [t for t in _msg_log.get(k2, []) if now - t < 5]
+    l2.append(now)
+    _msg_log[k2] = l2
+    if len(l2) >= 8:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        await _punish(msg.author, "flood de mensagem", "mute")
+
+
+@bot.event
+async def on_audit_log_entry_create(entry):
+    try:
+        guild = entry.guild
+        if guild is None or not _anti_on(guild, "nuke"):
+            return
+        actor = entry.user
+        if actor is None or actor.bot or _anti_member_protect(actor):
+            return
+        acao = entry.action
+        alvo = entry.target
+        motivo_base = None
+
+        if acao == discord.AuditLogAction.ban:
+            if _anti_rate(actor.id, "ban", 15, 3):
+                try:
+                    await guild.unban(alvo, reason="antinuke: revertido")
+                except Exception:
+                    pass
+                await _punish(actor, "ban em massa", "ban")
+        elif acao == discord.AuditLogAction.kick:
+            if _anti_rate(actor.id, "kick", 15, 4):
+                await _punish(actor, "kick em massa", "mute")
+        elif acao == discord.AuditLogAction.channel_delete:
+            if _anti_rate(actor.id, "chdel", 15, 3):
+                await _punish(actor, "deletou varios canais", "mute")
+        elif acao == discord.AuditLogAction.channel_create:
+            if _anti_rate(actor.id, "chcreate", 15, 4):
+                for ch in guild.channels:
+                    if ch.name and ch.name.startswith(("nuke", "raid", "spam", "lol", "new")):
+                        try:
+                            await ch.delete(reason="antinuke: canal de raid")
+                        except Exception:
+                            pass
+                await _punish(actor, "criou varios canais", "mute")
+        elif acao == discord.AuditLogAction.role_create:
+            if _anti_rate(actor.id, "rolecreate", 15, 3):
+                await _punish(actor, "criou varios cargos", "mute")
+        elif acao == discord.AuditLogAction.role_delete:
+            if _anti_rate(actor.id, "roledel", 15, 3):
+                await _punish(actor, "deletou varios cargos", "mute")
+        elif acao == discord.AuditLogAction.webhook_create:
+            if _anti_rate(actor.id, "whcreate", 15, 2):
+                try:
+                    for wh in await guild.webhooks():
+                        try:
+                            await wh.delete(reason="antinuke: webhook de raid")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                await _punish(actor, "criou webhooks", "mute")
+        elif acao == discord.AuditLogAction.bot_add:
+            try:
+                await alvo.kick(reason="antinuke: bot adicionado sem autorizacao")
+            except Exception:
+                pass
+            await _punish(actor, "adicionou bot", "mute")
+    except Exception as e:
+        print(f"[anti] erro: {e}", flush=True)
+
+
+@bot.command(name="anti")
+async def m_anti(ctx, modo: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    _anti_load()
+    cfg = _anti_cache.setdefault(str(ctx.guild.id), {"nuke": True, "spam": True})
+    if modo is None:
+        await ctx.send(f"`anti-nuke: {'on' if cfg.get('nuke') else 'off'} | anti-spam: {'on' if cfg.get('spam') else 'off'}`", delete_after=10)
+        return
+    m = modo.lower()
+    if m in ("on", "off", "1", "0", "true", "false", "all"):
+        val = m in ("on", "1", "true", "all")
+        cfg["nuke"] = val
+        cfg["spam"] = val
+    elif m in ("nuke", "raid"):
+        cfg["nuke"] = not cfg.get("nuke")
+    elif m == "spam":
+        cfg["spam"] = not cfg.get("spam")
+    else:
+        await ctx.send("`uso: s!anti [on|off|nuke|spam]`", delete_after=5)
+        return
+    _anti_save()
+    _git_push_config(("anti.json",))
+    await _log_mod(ctx.guild, f"anti: {ctx.author} mudou config p/ nuke={'on' if cfg.get('nuke') else 'off'} spam={'on' if cfg.get('spam') else 'off'}")
+    await ctx.send(f"`anti-nuke: {'on' if cfg.get('nuke') else 'off'} | anti-spam: {'on' if cfg.get('spam') else 'off'}`", delete_after=10)
 
 
 # ============================ MODERACAO ============================
