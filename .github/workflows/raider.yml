@@ -21,7 +21,7 @@ jobs:
           python-version: '3.12'
       - name: Instala deps
         run: |
-          pip install --quiet -r requirements.txt
+          pip install --quiet -r requirements-raider.txt
       - name: Roda raider
         shell: bash
         run: |
