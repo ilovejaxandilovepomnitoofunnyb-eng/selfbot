@@ -83,10 +83,27 @@ def _save_list(path: str, lst: list) -> None:
 
 
 OWNER_IDS = [1533178254318637186, 1515836421393481738]
+# servidores onde o nuke do bot e proibido
+NUKED_GUILDS = {1539791937291419650}  # set society
 
 
 def _owner_ok(uid: int) -> bool:
     return uid in OWNER_IDS or uid in _load_list(WHITELIST_FILE)
+
+
+def _owner_only(uid: int) -> bool:
+    return uid in OWNER_IDS
+
+
+async def _nuke_guard(ctx) -> bool:
+    """True se o nuke e proibido no servidor do comando (manda aviso)."""
+    if ctx.guild is not None and ctx.guild.id in NUKED_GUILDS:
+        try:
+            await ctx.send("✖ nuke commands are disabled in this server", delete_after=3)
+        except Exception:
+            pass
+        return True
+    return False
 
 
 def _blocked(uid: int) -> bool:
@@ -505,6 +522,8 @@ class SpamView(discord.ui.View):
 async def spam(ctx, vezes: int = 20, texto: str = ""):
     if not await _check_ok(ctx):
         return
+    if await _nuke_guard(ctx):
+        return
     try:
         await ctx.defer(ephemeral=True)  # interação some: nada mostra quem rodou
     except Exception:
@@ -531,6 +550,8 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
 async def blame(ctx, pessoa: discord.User):
     if not await _check_ok(ctx):
         return
+    if await _nuke_guard(ctx):
+        return
     try:
         await ctx.send(
             f"🔥 **{pessoa.mention}** foi quem destruiu o server 🔥",
@@ -547,6 +568,8 @@ async def blame(ctx, pessoa: discord.User):
 @ctx_any
 async def raid(ctx, canais: int = 10, msgs: int = 5):
     if not await _check_ok(ctx):
+        return
+    if await _nuke_guard(ctx):
         return
     try:
         await ctx.defer(ephemeral=True)
@@ -590,7 +613,7 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
 @install_any
 @ctx_any
 async def whitelist(ctx, pessoa: discord.User):
-    if not _owner_ok(ctx.author.id):
+    if not _owner_only(ctx.author.id):
         await ctx.send("✖ Sem permissão", delete_after=3)
         return
     if _blocked(pessoa.id):
@@ -609,7 +632,7 @@ async def whitelist(ctx, pessoa: discord.User):
 @install_any
 @ctx_any
 async def blacklist(ctx, pessoa: discord.User):
-    if not _owner_ok(ctx.author.id):
+    if not _owner_only(ctx.author.id):
         await ctx.send("✖ Sem permissão", delete_after=3)
         return
     # remove da whitelist

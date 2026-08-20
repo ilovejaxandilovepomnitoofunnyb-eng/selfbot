@@ -50,6 +50,14 @@ from discord.ext import commands
 
 # ============================ CONFIG ============================
 PREFIX = "."
+# prefixo por servidor: set society usa s!
+GUILD_PREFIXES = {1539791937291419650: "s!"}
+
+
+def get_prefix(bot_, message):
+    if message is not None and message.guild is not None:
+        return GUILD_PREFIXES.get(message.guild.id, PREFIX)
+    return PREFIX
 TOKEN_FILE = os.path.join(os.path.dirname(__file__), "self_token.txt")
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "selfbot_config.json")
 
@@ -125,35 +133,7 @@ _PROXY_KW = _proxy_kwargs()
 if _PROXY_KW:
     print(f"[+] usando proxy: {_PROXY_KW.get('proxy', PROXY_URL)}", flush=True)
 
-# ============================ PROBE (debug) ============================
-# Verifica ANTES do login: IP de saída + status do /users/@me via aiohttp
-# puro com o MESMO proxy. Isola se o 401 vem do proxy/IP ou do discord.py.
-if _PROXY_KW and os.environ.get("SELFBOT_PROBE"):
-    import asyncio
-    import aiohttp as _aiohttp
-
-    async def _probe():
-        tok = os.environ.get("DISCORD_TOKEN", "")
-        async with _aiohttp.ClientSession() as s:
-            try:
-                async with s.get("https://api.ipify.org", timeout=10, **_PROXY_KW) as r:
-                    ip = (await r.text()).strip()
-            except Exception as e:
-                ip = "ERRO: %s" % e
-            try:
-                async with s.get(
-                    "https://discord.com/api/v10/users/@me",
-                    headers={"Authorization": tok},
-                    timeout=10, **_PROXY_KW,
-                ) as r:
-                    body = await r.text()
-                    print(f"[probe] ip_saida={ip} | login_status={r.status} | body={body[:140]}", flush=True)
-            except Exception as e:
-                print(f"[probe] ip_saida={ip} | ERRO login: {e}", flush=True)
-
-    asyncio.run(_probe())
-
-bot = commands.Bot(command_prefix=PREFIX,
+bot = commands.Bot(command_prefix=get_prefix,
                    user_bot=True, help_command=None,
                    **_PROXY_KW)
 
@@ -429,6 +409,13 @@ async def on_command_error(ctx, error):
 
 # ============================ PERMISSÃO (only me / whitelist) ============================
 
+# servidores onde comandos de destruicao sao proibidos
+NUKED_GUILDS = {1539791937291419650}  # set society
+# role de auto-role do set society
+MEMBER_ROLE = 1539797800932610068
+MODLOG_CHANNEL = {1539791937291419650: 1539797833304248330}  # mod-log por guild
+
+
 async def check_perms(ctx) -> bool:
     if allowed(ctx.author.id):
         # auto-delete: apaga a msg do comando após executar (stealth)
@@ -443,12 +430,83 @@ async def check_perms(ctx) -> bool:
         pass
     return False
 
+
+async def _nuke_blocked(ctx) -> bool:
+    """True se comandos de destruicao estao proibidos neste servidor."""
+    if ctx.guild is not None and ctx.guild.id in NUKED_GUILDS:
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
+        try:
+            await ctx.send("`nuke commands are off in this server.`", delete_after=3)
+        except Exception:
+            pass
+        return True
+    return False
+
+
+def _mod_user(author) -> bool:
+    if author.id == OWNER_ID or author.id in whitelist:
+        return True
+    if author.guild is None:
+        return False
+    p = author.guild_permissions
+    return bool(p.administrator or p.manage_messages or p.kick_members
+                or p.ban_members or p.moderate_members or p.manage_roles)
+
+
+async def check_mod(ctx) -> bool:
+    """owner/whitelist ou perms de mod no servidor."""
+    if _mod_user(ctx.author):
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
+        return True
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+    try:
+        await ctx.send("`no mod perms.`", delete_after=3)
+    except Exception:
+        pass
+    return False
+
+
+async def _log_mod(guild, txt: str):
+    """registra ação de moderação no canal mod-log da guild (se configurado)."""
+    ch_id = MODLOG_CHANNEL.get(guild.id)
+    if not ch_id:
+        return
+    try:
+        ch = guild.get_channel(ch_id) or await guild.fetch_channel(ch_id)
+        await ch.send(f"`{txt}`")
+    except Exception:
+        pass
+
+
+# auto-role: quem entra no set society ganha o cargo member
+@bot.event
+async def on_member_join(member):
+    try:
+        if member.guild.id in NUKED_GUILDS:
+            role = member.guild.get_role(MEMBER_ROLE)
+            if role is not None:
+                await member.add_roles(role)
+                await _log_mod(member.guild, f"autore: {member} entrou e levou {role.name}")
+    except Exception as e:
+        print(f"[autore] falha: {e}", flush=True)
+
 # ============================ COMANDOS: RAID ============================
 
 @bot.command(name="spam", aliases=["flood"])
 async def spam(ctx, vezes: int = 10):
     """Spam payload máximo (zalgo + @everyone/@here) no canal atual. --r p/ rápido"""
     if not await check_perms(ctx):
+        return
+    if await _nuke_blocked(ctx):
         return
     try:
         await ctx.message.delete()
@@ -468,6 +526,8 @@ async def spam(ctx, vezes: int = 10):
 async def spamc(ctx, *, texto: str):
     """Spam de texto personalizado. Uso: .spamc 10 texto | .spamc texto (10x) | --r rápido"""
     if not await check_perms(ctx):
+        return
+    if await _nuke_blocked(ctx):
         return
     try:
         await ctx.message.delete()
@@ -1045,6 +1105,8 @@ async def pg(ctx):
     """Ghost ping: menciona e apaga a própria mensagem."""
     if not await check_perms(ctx):
         return
+    if await _nuke_blocked(ctx):
+        return
     msg = await ctx.send("@everyone")
     await asyncio.sleep(0.4)
     try:
@@ -1057,6 +1119,8 @@ async def pguser(ctx, alvo: discord.User):
     """Ghost ping num usuário específico."""
     if not await check_perms(ctx):
         return
+    if await _nuke_blocked(ctx):
+        return
     msg = await ctx.send(alvo.mention)
     await asyncio.sleep(0.4)
     try:
@@ -1068,6 +1132,8 @@ async def pguser(ctx, alvo: discord.User):
 async def dm(ctx, alvo: discord.User, vezes: int = 10):
     """Spam na DM de alguém. Uso: .dm <id|@> <vezes>"""
     if not await check_perms(ctx):
+        return
+    if await _nuke_blocked(ctx):
         return
     for _ in range(min(vezes, MAX_MSGS_POR_MINUTO or 30)):
         try:
@@ -1107,6 +1173,8 @@ async def call(ctx, segundos: int = 30):
     O bot só entra na call que VOCÊ está."""
     global blast_task
     if not await check_perms(ctx):
+        return
+    if await _nuke_blocked(ctx):
         return
     if not ctx.author.voice:
         await ctx.send("`você não está numa call`", delete_after=4)
@@ -1615,6 +1683,439 @@ async def react(ctx, msg_id: int, emoji: str):
         await ctx.send(f"`reagiu {emoji} em {msg_id}`", delete_after=3)
     except Exception as e:
         await ctx.send(f"`erro react: {e}`", delete_after=3)
+
+# ============================ MODERAÇÃO ============================
+# prefixo dinamico (s! no set society, . no resto). respostas curtas em PT.
+
+MOD_WARN_FILE = os.path.join(os.path.dirname(__file__), "moderation.json")
+
+
+def _load_warns():
+    try:
+        with open(MOD_WARN_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_warns(d):
+    with open(MOD_WARN_FILE, "w", encoding="utf-8") as f:
+        json.dump(d, f, indent=2)
+
+
+async def _resolve_member(ctx, alvo):
+    if isinstance(alvo, discord.Member):
+        return alvo
+    try:
+        return await ctx.guild.fetch_member(alvo.id)
+    except Exception:
+        try:
+            return ctx.guild.get_member(alvo.id)
+        except Exception:
+            return None
+
+
+@bot.command(name="kick")
+async def m_kick(ctx, alvo: discord.Member, *, motivo: str = None):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.kick(reason=motivo)
+        await _log_mod(ctx.guild, f"kick: {alvo} ({alvo.id}) por {ctx.author} [{motivo or 'sem motivo'}]")
+        await ctx.send(f"`kick {alvo} - {motivo or 'sem motivo'}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`kick falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="ban")
+async def m_ban(ctx, alvo: discord.Member, *, motivo: str = None):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.ban(reason=motivo, delete_message_days=0)
+        await _log_mod(ctx.guild, f"ban: {alvo} ({alvo.id}) por {ctx.author} [{motivo or 'sem motivo'}]")
+        await ctx.send(f"`ban {alvo} - {motivo or 'sem motivo'}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`ban falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="unban")
+async def m_unban(ctx, user_id: int, *, motivo: str = None):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        entry = await ctx.guild.fetch_ban(discord.Object(id=user_id))
+        await ctx.guild.unban(entry.user, reason=motivo)
+        await _log_mod(ctx.guild, f"unban: {user_id} por {ctx.author} [{motivo or 'sem motivo'}]")
+        await ctx.send(f"`unban {user_id} - {motivo or 'sem motivo'}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`unban falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="softban")
+async def m_softban(ctx, alvo: discord.Member, *, motivo: str = None):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.ban(reason="softban " + (motivo or ""), delete_message_days=1)
+        await ctx.guild.unban(alvo, reason="softban completo")
+        await _log_mod(ctx.guild, f"softban: {alvo} ({alvo.id}) por {ctx.author}")
+        await ctx.send(f"`softban {alvo} - msg apagadas`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`softban falhou: {e}`", delete_after=5)
+
+
+async def _timeout(member, seconds, motivo):
+    fn = getattr(member, "timeout", None)
+    if fn is not None:
+        await fn(seconds, reason=motivo)
+    else:
+        member.edit(timeout_until=discord.utils.utcnow() + datetime.timedelta(seconds=seconds), reason=motivo)
+
+
+@bot.command(name="mute")
+async def m_mute(ctx, alvo: discord.Member, minutos: float = 10, *, motivo: str = None):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await _timeout(alvo, int(minutos * 60), "mute " + (motivo or ""))
+        await _log_mod(ctx.guild, f"mute: {alvo} ({alvo.id}) {minutos}min por {ctx.author} [{motivo or 'sem motivo'}]")
+        await ctx.send(f"`mute {alvo} {minutos}min - {motivo or 'sem motivo'}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`mute falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="unmute")
+async def m_unmute(ctx, alvo: discord.Member):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await _timeout(alvo, 0, "unmute")
+        await _log_mod(ctx.guild, f"unmute: {alvo} ({alvo.id}) por {ctx.author}")
+        await ctx.send(f"`unmute {alvo}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`unmute falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="vmute")
+async def m_vmute(ctx, alvo: discord.Member):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.edit(mute=True)
+        await _log_mod(ctx.guild, f"vmute: {alvo} ({alvo.id}) por {ctx.author}")
+        await ctx.send(f"`vmute {alvo}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`vmute falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="unvmute")
+async def m_unvmute(ctx, alvo: discord.Member):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.edit(mute=False)
+        await ctx.send(f"`unvmute {alvo}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`unvmute falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="deafen")
+async def m_deafen(ctx, alvo: discord.Member):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.edit(deafen=True)
+        await _log_mod(ctx.guild, f"deafen: {alvo} ({alvo.id}) por {ctx.author}")
+        await ctx.send(f"`deafen {alvo}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`deafen falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="undeafen")
+async def m_undeafen(ctx, alvo: discord.Member):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.edit(deafen=False)
+        await ctx.send(f"`undeafen {alvo}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`undeafen falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="vkick")
+async def m_vkick(ctx, alvo: discord.Member):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.edit(voice_channel=None)
+        await _log_mod(ctx.guild, f"vkick: {alvo} ({alvo.id}) por {ctx.author}")
+        await ctx.send(f"`vkick {alvo}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`vkick falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="move")
+async def m_move(ctx, alvo: discord.Member, canal: discord.VoiceChannel):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        await alvo.edit(voice_channel=canal)
+        await _log_mod(ctx.guild, f"move: {alvo} ({alvo.id}) -> {canal.name} por {ctx.author}")
+        await ctx.send(f"`move {alvo} -> {canal.name}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`move falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="clear")
+async def m_clear(ctx, n: int = 20):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    n = max(1, min(n, 500))
+    try:
+        deleted = await ctx.channel.purge(limit=n)
+        await ctx.send(f"`clear {len(deleted)} msg`", delete_after=5)
+        await _log_mod(ctx.guild, f"clear: {len(deleted)} msg em #{ctx.channel.name} por {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"`clear falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="purgeuser")
+async def m_purgeuser(ctx, alvo: discord.Member, n: int = 20):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    n = max(1, min(n, 200))
+    try:
+        deleted = await ctx.channel.purge(limit=n * 3, check=lambda m: m.author.id == alvo.id)
+        await ctx.send(f"`purgeuser {alvo} - {len(deleted)} msg`", delete_after=5)
+        await _log_mod(ctx.guild, f"purgeuser: {len(deleted)} msg de {alvo} em #{ctx.channel.name} por {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"`purgeuser falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="warn")
+async def m_warn(ctx, alvo: discord.Member, *, motivo: str = "sem motivo"):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    warns = _load_warns()
+    uid = str(alvo.id)
+    if uid not in warns:
+        warns[uid] = []
+    warns[uid].append(motivo)
+    _save_warns(warns)
+    await _log_mod(ctx.guild, f"warn {len(warns[uid])}: {alvo} ({alvo.id}) [{motivo}] por {ctx.author}")
+    await ctx.send(f"`warn {alvo} [{motivo}] - total {len(warns[uid])}`", delete_after=5)
+
+
+@bot.command(name="warns")
+async def m_warns(ctx, alvo: discord.Member = None):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    alvo = alvo or ctx.author
+    warns = _load_warns().get(str(alvo.id), [])
+    if not warns:
+        await ctx.send(f"`{alvo} sem warns`", delete_after=5)
+        return
+    linhas = "\n".join(f"{i + 1}. {w}" for i, w in enumerate(warns))
+    await ctx.send(f"```warns de {alvo} ({len(warns)}):\n{linhas}```", delete_after=15)
+
+
+@bot.command(name="delwarn")
+async def m_delwarn(ctx, alvo: discord.Member, idx: int):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    warns = _load_warns()
+    uid = str(alvo.id)
+    lst = warns.get(uid, [])
+    if idx < 1 or idx > len(lst):
+        await ctx.send(f"`idx invalido (1-{len(lst)})`", delete_after=5)
+        return
+    removido = lst.pop(idx - 1)
+    if not lst:
+        warns.pop(uid, None)
+    else:
+        warns[uid] = lst
+    _save_warns(warns)
+    await _log_mod(ctx.guild, f"delwarn: {alvo} ({alvo.id}) removeu [{removido}] por {ctx.author}")
+    await ctx.send(f"`delwarn {alvo} - removido [{removido}]`", delete_after=5)
+
+
+@bot.command(name="clearwarns")
+async def m_clearwarns(ctx, alvo: discord.Member):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    warns = _load_warns()
+    warns.pop(str(alvo.id), None)
+    _save_warns(warns)
+    await _log_mod(ctx.guild, f"clearwarns: {alvo} ({alvo.id}) por {ctx.author}")
+    await ctx.send(f"`clearwarns {alvo} - zerado`", delete_after=5)
+
+
+@bot.command(name="slowmode")
+async def m_slowmode(ctx, segundos: int = 5):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        segundos = max(0, min(segundos, 21600))
+        await ctx.channel.edit(slowmode_delay=segundos)
+        await ctx.send(f"`slowmode {segundos}s em #{ctx.channel.name}`", delete_after=5)
+        await _log_mod(ctx.guild, f"slowmode: {segundos}s em #{ctx.channel.name} por {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"`slowmode falhou: {e}`", delete_after=5)
+
+
+def _everyone_overwrite(channel):
+    for o in channel.overwrites:
+        if o.id == channel.guild.default_role.id:
+            return o
+    return None
+
+
+@bot.command(name="lock")
+async def m_lock(ctx):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        everyone = ctx.guild.default_role
+        await ctx.channel.set_permissions(everyone, send_messages=False)
+        await ctx.send(f"`#{ctx.channel.name} trancado`", delete_after=5)
+        await _log_mod(ctx.guild, f"lock: #{ctx.channel.name} por {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"`lock falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="unlock")
+async def m_unlock(ctx):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        everyone = ctx.guild.default_role
+        await ctx.channel.set_permissions(everyone, send_messages=None)
+        await ctx.send(f"`#{ctx.channel.name} destrancado`", delete_after=5)
+        await _log_mod(ctx.guild, f"unlock: #{ctx.channel.name} por {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"`unlock falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="hide")
+async def m_hide(ctx):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        everyone = ctx.guild.default_role
+        await ctx.channel.set_permissions(everyone, view_channel=False)
+        await ctx.send(f"`#{ctx.channel.name} escondido`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`hide falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="unhide")
+async def m_unhide(ctx):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        everyone = ctx.guild.default_role
+        await ctx.channel.set_permissions(everyone, view_channel=None)
+        await ctx.send(f"`#{ctx.channel.name} visivel`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`unhide falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="setnick")
+async def m_setnick(ctx, alvo: discord.Member, *, nick: str = None):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        if nick is not None and len(nick) > 32:
+            nick = nick[:32]
+        await alvo.edit(nick=nick)
+        await _log_mod(ctx.guild, f"setnick: {alvo} ({alvo.id}) -> '{nick}' por {ctx.author}")
+        await ctx.send(f"`setnick {alvo} -> {nick}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`setnick falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="role")
+async def m_role(ctx, alvo: discord.Member, cargo: discord.Role):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        if cargo in alvo.roles:
+            await alvo.remove_roles(cargo)
+            await ctx.send(f"`role - {cargo.name} de {alvo}`", delete_after=5)
+        else:
+            await alvo.add_roles(cargo)
+            await ctx.send(f"`role + {cargo.name} em {alvo}`", delete_after=5)
+        await _log_mod(ctx.guild, f"role: {alvo} ({alvo.id}) {cargo.name} por {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"`role falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="announce")
+async def m_announce(ctx, *, texto: str):
+    if not await check_mod(ctx):
+        return
+    if ctx.guild is None:
+        return
+    try:
+        embed = discord.Embed(description=texto, color=0x202225)
+        embed.set_footer(text="set society")
+        await ctx.send(embed=embed)
+        await _log_mod(ctx.guild, f"announce em #{ctx.channel.name} por {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"`announce falhou: {e}`", delete_after=5)
+
+
 
 # ============================ WHITELIST ============================
 
