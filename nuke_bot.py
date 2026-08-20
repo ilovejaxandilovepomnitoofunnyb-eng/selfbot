@@ -286,6 +286,11 @@ def _build_poll(question: str, options: list) -> discord.Poll:
 
 # ============================ EVENTOS ============================
 @bot.event
+async def setup_hook():
+    bot.loop.create_task(_autorole_loop())
+
+
+@bot.event
 async def on_ready():
     print(f"[+] Logado como {bot.user} (ID: {bot.user.id})", flush=True)
     print(f"[+] Prefixo: {PREFIX} | Slash: / | Guilds: {len(bot.guilds)}", flush=True)
@@ -1670,5 +1675,4 @@ async def _autorole_loop():
 
 # ============================ MAIN ============================
 if __name__ == "__main__":
-    bot.loop.create_task(_autorole_loop())
     bot.run(TOKEN)
