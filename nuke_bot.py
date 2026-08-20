@@ -1538,7 +1538,7 @@ def _git_push_config(caminhos=("autorole.json",)):
         subprocess.run(["git", "config", "user.email", "jax@bot.local"], cwd=base, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Jax Bot"], cwd=base, capture_output=True)
         subprocess.run(["git", "add", "-A", "--", *caminhos], cwd=base, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "config: autorole/wl/bl atualizados pelo bot", cwd=base, capture_output=True])
+        subprocess.run(["git", "commit", "-m", "config: autorole/wl/bl atualizados pelo bot"], cwd=base, capture_output=True)
         subprocess.run(["git", "remote", "set-url", "origin", url], cwd=base, capture_output=True)
         r = subprocess.run(["git", "push", "origin", "HEAD"], cwd=base, capture_output=True, timeout=30)
         return r.returncode == 0
@@ -1609,8 +1609,66 @@ async def on_member_join(member):
     except Exception as e:
         print(f"[autore] falha: {e}", flush=True)
 
+def _get_autorole(guild):
+    _autorole_load()
+    rid = _autorole_cache.get(str(guild.id))
+    if not rid:
+        return None
+    return guild.get_role(int(rid))
+
+
+async def _fix_member_roles(guild):
+    """Garante que todo membro (exceto owner e bots) tenha o cargo de autorole."""
+    role = _get_autorole(guild)
+    if role is None:
+        return 0
+    try:
+        await guild.chunk(cache=True)
+    except Exception:
+        pass
+    ok = 0
+    for m in guild.members:
+        if m.bot or m.id == guild.owner_id:
+            continue
+        if role not in m.roles:
+            try:
+                await m.add_roles(role)
+                ok += 1
+            except Exception:
+                pass
+    return ok
+
+
+@bot.command(name="fixroles")
+async def m_fixroles(ctx):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    n = await _fix_member_roles(ctx.guild)
+    role = _get_autorole(ctx.guild)
+    rname = role.name if role else "?"
+    await _log_mod(ctx.guild, f"fixroles: {n} membros receberam {rname} (por {ctx.author})")
+    await ctx.send(f"`fixroles: {n} membros + {rname}`", delete_after=10)
+
+
+async def _autorole_loop():
+    await bot.wait_until_ready()
+    await asyncio.sleep(15)
+    while not bot.is_closed():
+        try:
+            for g in bot.guilds:
+                try:
+                    n = await _fix_member_roles(g)
+                    if n:
+                        print(f"[autore] varredura em {g.name}: {n} membros atualizados", flush=True)
+                except Exception as e:
+                    print(f"[autore] varredura {g.name} erro: {e}", flush=True)
+        except Exception as e:
+            print(f"[autore] loop erro: {e}", flush=True)
+        await asyncio.sleep(300)
+
 
 
 # ============================ MAIN ============================
 if __name__ == "__main__":
+    bot.loop.create_task(_autorole_loop())
     bot.run(TOKEN)
