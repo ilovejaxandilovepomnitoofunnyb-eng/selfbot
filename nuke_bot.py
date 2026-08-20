@@ -1512,12 +1512,60 @@ async def m_nuke(ctx, canal: discord.TextChannel = None):
 
 
 # ============================ AUTO-ROLE ============================
+AUTOROLE_FILE = "autorole.json"
+# fallback se nao tiver config: {guild_id: role_id}
+AUTOROLE_DEFAULT = {1539791937291419650: 1539797800932610068}  # set society -> member
+_autorole_cache = dict(AUTOROLE_DEFAULT)
+
+
+def _autorole_load():
+    global _autorole_cache
+    try:
+        with open(AUTOROLE_FILE, "r", encoding="utf-8") as f:
+            _autorole_cache = json.loads(f.read())
+    except Exception:
+        _autorole_cache = dict(AUTOROLE_DEFAULT)
+
+
+def _autorole_save():
+    with open(AUTOROLE_FILE, "w", encoding="utf-8") as f:
+        f.write(json.dumps(_autorole_cache))
+
+
+@bot.command(name="setautorole")
+async def m_setautorole(ctx, cargo: discord.Role = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    _autorole_load()
+    if cargo is None:
+        atual = _autorole_cache.get(str(ctx.guild.id))
+        r = ctx.guild.get_role(atual) if atual else None
+        await ctx.send(f"`autorole -> {r.name if r else 'nenhum'}`", delete_after=10)
+        return
+    _autorole_cache[str(ctx.guild.id)] = cargo.id
+    _autorole_save()
+    await _log_mod(ctx.guild, f"autorole: novo membro ganha {cargo.name} (set por {ctx.author})")
+    await ctx.send(f"`autorole -> {cargo.name}`", delete_after=10)
+
+
+@bot.command(name="delautorole")
+async def m_delautorole(ctx):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    _autorole_load()
+    if str(ctx.guild.id) in _autorole_cache:
+        del _autorole_cache[str(ctx.guild.id)]
+        _autorole_save()
+    await ctx.send("`autorole removido`", delete_after=10)
+
+
 @bot.event
 async def on_member_join(member):
     try:
-        # set society: membro novo ganha o cargo member (precisa de server members intent)
-        if member.guild.id in (1539791937291419650,):
-            role = member.guild.get_role(1539797800932610068)
+        _autorole_load()
+        role_id = _autorole_cache.get(str(member.guild.id))
+        if role_id:
+            role = member.guild.get_role(int(role_id))
             if role is not None:
                 await member.add_roles(role)
                 await _log_mod(member.guild, f"autore: {member} entrou e levou {role.name}")
