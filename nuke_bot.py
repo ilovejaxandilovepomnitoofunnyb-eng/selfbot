@@ -18,6 +18,7 @@ import json
 import math
 import os
 import random
+import re
 import struct
 import sys
 import time
@@ -664,29 +665,6 @@ async def blacklist(ctx, pessoa: discord.User):
 
 
 # ============================ HELP ============================
-@bot.command(name="help", aliases=["cmds", "ajuda"])
-async def jax_help(ctx, page: str = None):
-    if not await _check_ok(ctx):
-        return
-    lines = [
-        "**comandos (s! no set society, . nos outros):**",
-        "**nuke (off no set society):**",
-        "  /spam [n] [texto] | /raid [canais] [msgs] | /blame @user | /ping",
-        "  .whitelist <@user> | .blacklist <@user> (so owner)",
-        "**moderacao:**",
-        "  kick <@user> [motivo] | ban <@user> [motivo] | unban <id> | softban <@user>",
-        "  mute <@user> [min] | unmute <@user> | vmute <@user> | unvmute <@user>",
-        "  deafen <@user> | undeafen <@user> | vkick <@user> | move <@user> <canal>",
-        "  clear [n] | purgeuser <@user> [n] | warn <@user> <motivo> | warns <@user>",
-        "  delwarn <@user> <idx> | clearwarns <@user> | slowmode [seg]",
-        "  lock | unlock | hide | unhide | setnick <@user> <nick> | role <@user> <cargo>",
-        "  announce <texto>",
-        "**embed/webhook:**",
-        "  embed <titulo> | <desc> --color #hex --footer <txt> --image <url> --thumb <url>",
-        "  webhook create <nome> [canal_id] | webhook list [canal_id]",
-        "  webhook send <url> <texto> | webhook embed <url> <titulo> | <desc> | webhook delete <id>",
-    ]
-    await ctx.send("\n".join(lines), delete_after=None)
 
 
 # ============================ MODERACAO ============================
@@ -1165,6 +1143,386 @@ async def m_webhook(ctx, acao: str = None, alvo: str = None, *, extra: str = Non
             await ctx.send("`uso: webhook create|list|send|embed|delete`", delete_after=5)
     except Exception as e:
         await ctx.send(f"`webhook erro: {e}`", delete_after=5)
+
+
+
+
+# ============================ HELP EXPANDIDO ============================
+HELP_CATS = {
+    "mod": [
+        "kick <@user> [motivo]", "ban <@user> [motivo]", "unban <id>", "softban <@user>",
+        "mute <@user> [min] (timeout)", "unmute <@user>", "vmute <@user>", "unvmute <@user>",
+        "deafen <@user> (corta som da call)", "undeafen <@user>", "vkick <@user> (tira da call)",
+        "move <@user> <canal>", "moveall <canal>",
+        "clear [n]", "purgeuser <@user> [n]",
+        "warn <@user> <motivo>", "warns <@user>", "delwarn <@user> <idx>", "clearwarns <@user>",
+        "slowmode [seg]", "lock", "unlock", "hide", "unhide",
+        "setnick <@user> <nick>", "role <@user> <cargo>", "roleall <cargo>", "delroleall <cargo>",
+        "announce <texto>",
+    ],
+    "canal": [
+        "create <texto|voz> <nome> [categoria]", "delete <canal>", "clone <canal>",
+        "rename <canal> <nome>", "topic <texto>", "thread <nome>", "invite",
+    ],
+    "info": [
+        "avatar [@user]", "banner [@user]", "userinfo [@user]", "serverinfo",
+        "roleinfo <cargo>", "emojis", "ping",
+    ],
+    "embed": [
+        "embed <titulo> | <desc> --color #hex --footer <txt> --image <url> --thumb <url>",
+    ],
+    "webhook": [
+        "webhook create <nome> [canal_id]", "webhook list [canal_id]",
+        "webhook send <url> <texto>", "webhook embed <url> <titulo> | <desc>",
+        "webhook delete <id>",
+    ],
+    "diversao": [
+        "poll <pergunta> | opcao1 | opcao2 ...", "say <texto>", "calc <expressao>", "roll <n>",
+    ],
+    "raid": [
+        "/spam [n] [texto]", "/raid [canais] [msgs]", "/blame @user", "nuke <canal>",
+        "/whitelist <@user> (so owner)", "/blacklist <@user> (so owner)",
+        "obs: raid desligado no set society",
+    ],
+}
+
+
+@bot.command(name="help", aliases=["cmds", "ajuda"])
+async def jax_help(ctx, cat: str = None):
+    if not await _check_ok(ctx):
+        return
+    if cat:
+        cat = cat.lower()
+        if cat not in HELP_CATS:
+            await ctx.send("`categorias: " + " | ".join(HELP_CATS) + "`", delete_after=10)
+            return
+        await ctx.send(f"**{cat}**\n" + "\n".join(f"  {c}" for c in HELP_CATS[cat]), delete_after=None)
+        return
+    linhas = [f"**comandos ({PREFIX} no set society, . nos outros)**"]
+    for nome, cmds in HELP_CATS.items():
+        linhas.append(f"\n**{nome}:**")
+        linhas.extend(f"  {c}" for c in cmds)
+    linhas.append("\n*so owner + whitelist usa. help <categoria> mostra uma lista so.*")
+    await ctx.send("\n".join(linhas), delete_after=None)
+
+
+# ============================ MANIPULACAO DE CANAL ============================
+@bot.command(name="create")
+async def m_create(ctx, tipo: str = "texto", nome: str = "novo-canal", *, categoria: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    try:
+        ctype = discord.ChannelType.voice if tipo.lower() in ("voz", "voice", "vc") else discord.ChannelType.text
+        parent = None
+        if categoria:
+            parent = discord.utils.get(ctx.guild.categories, name=categoria)
+        ch = await ctx.guild.create_channel(nome, type=ctype, category=parent)
+        await _log_mod(ctx.guild, f"create: #{ch.name} por {ctx.author}")
+        await ctx.send(f"`criado #{ch.name} (id {ch.id})`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`create falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="delete")
+async def m_delete(ctx, canal: discord.abc.GuildChannel = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    canal = canal or ctx.channel
+    if canal.id == ctx.guild.rules_channel_id or canal.id == ctx.guild.public_updates_channel_id:
+        await ctx.send("`nao apago canal de regras/updates`", delete_after=5)
+        return
+    try:
+        nome = canal.name
+        await canal.delete()
+        await _log_mod(ctx.guild, f"delete: #{nome} por {ctx.author}")
+        await ctx.send(f"`#{nome} deletado`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`delete falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="clone")
+async def m_clone(ctx, canal: discord.abc.GuildChannel = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    canal = canal or ctx.channel
+    try:
+        novo = await canal.clone()
+        await _log_mod(ctx.guild, f"clone: #{canal.name} -> #{novo.name} por {ctx.author}")
+        await ctx.send(f"`#{canal.name} clonado -> #{novo.name}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`clone falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="rename")
+async def m_rename(ctx, canal: discord.abc.GuildChannel, *, nome: str):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    try:
+        antigo = canal.name
+        await canal.edit(name=nome)
+        await _log_mod(ctx.guild, f"rename: #{antigo} -> #{nome} por {ctx.author}")
+        await ctx.send(f"`#{antigo} -> #{nome}`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`rename falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="topic")
+async def m_topic(ctx, *, texto: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    try:
+        await ctx.channel.edit(topic=texto or "")
+        await ctx.send(f"`topic atualizado`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`topic falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="thread")
+async def m_thread(ctx, *, nome: str):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    try:
+        t = await ctx.channel.create_thread(name=nome, auto_archive_duration=1440)
+        await ctx.send(f"`thread {t.name} criada`", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`thread falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="invite")
+async def m_invite(ctx, canal: discord.TextChannel = None):
+    if not await _check_ok(ctx):
+        return
+    canal = canal or ctx.channel
+    try:
+        inv = await canal.create_invite(max_age=0, max_uses=0)
+        await ctx.send(f"`{inv.url}`", delete_after=None)
+    except Exception as e:
+        await ctx.send(f"`invite falhou: {e}`", delete_after=5)
+
+
+# ============================ MASS ACTIONS ============================
+@bot.command(name="moveall")
+async def m_moveall(ctx, canal: discord.VoiceChannel):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    moved = 0
+    for m in ctx.guild.members:
+        if m.voice and m.voice.channel and m.voice.channel != canal:
+            try:
+                await m.edit(voice_channel=canal)
+                moved += 1
+            except Exception:
+                pass
+    await _log_mod(ctx.guild, f"moveall: {moved} -> {canal.name} por {ctx.author}")
+    await ctx.send(f"`moveall: {moved} movidos -> {canal.name}`", delete_after=5)
+
+
+@bot.command(name="roleall")
+async def m_roleall(ctx, cargo: discord.Role):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    ok = 0
+    for m in ctx.guild.members:
+        if cargo not in m.roles and not m.bot:
+            try:
+                await m.add_roles(cargo)
+                ok += 1
+            except Exception:
+                pass
+    await _log_mod(ctx.guild, f"roleall: {ok} + {cargo.name} por {ctx.author}")
+    await ctx.send(f"`roleall: {ok} membros + {cargo.name}`", delete_after=5)
+
+
+@bot.command(name="delroleall")
+async def m_delroleall(ctx, cargo: discord.Role):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    ok = 0
+    for m in ctx.guild.members:
+        if cargo in m.roles and not m.bot:
+            try:
+                await m.remove_roles(cargo)
+                ok += 1
+            except Exception:
+                pass
+    await _log_mod(ctx.guild, f"delroleall: {ok} - {cargo.name} por {ctx.author}")
+    await ctx.send(f"`delroleall: {ok} membros - {cargo.name}`", delete_after=5)
+
+
+# ============================ INFO ============================
+@bot.command(name="avatar")
+async def m_avatar(ctx, alvo: discord.Member = None):
+    if not await _check_ok(ctx):
+        return
+    alvo = alvo or ctx.author
+    try:
+        await ctx.send(alvo.avatar.url if alvo.avatar else "sem avatar")
+    except Exception as e:
+        await ctx.send(f"`avatar falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="banner")
+async def m_banner(ctx, alvo: discord.Member = None):
+    if not await _check_ok(ctx):
+        return
+    alvo = alvo or ctx.author
+    try:
+        user = await ctx.bot.fetch_user(alvo.id)
+        await ctx.send(user.banner.url if user.banner else "sem banner")
+    except Exception as e:
+        await ctx.send(f"`banner falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="userinfo")
+async def m_userinfo(ctx, alvo: discord.Member = None):
+    if not await _check_ok(ctx):
+        return
+    alvo = alvo or ctx.author
+    try:
+        roles = ", ".join(r.mention for r in alvo.roles[1:][:8]) or "nenhum"
+        await ctx.send(
+            f"**{alvo}** ({alvo.id})\n"
+            f"criou: {alvo.created_at:%d/%m/%Y}\n"
+            f"entrou: {alvo.joined_at:%d/%m/%Y}\n"
+            f"top role: {alvo.top_role.mention}\n"
+            f"cargos: {roles}\n"
+            f"bot: {'sim' if alvo.bot else 'nao'}",
+            delete_after=None)
+    except Exception as e:
+        await ctx.send(f"`userinfo falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="serverinfo")
+async def m_serverinfo(ctx):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    g = ctx.guild
+    try:
+        await ctx.send(
+            f"**{g.name}** ({g.id})\n"
+            f"dono: {g.owner.mention}\n"
+            f"membros: {g.member_count}\n"
+            f"canais: {len(g.channels)} | cargos: {len(g.roles)}\n"
+            f"criado: {g.created_at:%d/%m/%Y}",
+            delete_after=None)
+    except Exception as e:
+        await ctx.send(f"`serverinfo falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="roleinfo")
+async def m_roleinfo(ctx, cargo: discord.Role):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    try:
+        await ctx.send(
+            f"**{cargo.name}** ({cargo.id})\n"
+            f"cor: #{cargo.color.value:06x}\n"
+            f"posicao: {cargo.position}\n"
+            f"membros: {len(cargo.members)}\n"
+            f"menção: {cargo.mention}",
+            delete_after=None)
+    except Exception as e:
+        await ctx.send(f"`roleinfo falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="emojis")
+async def m_emojis(ctx):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    try:
+        if not ctx.guild.emojis:
+            await ctx.send("`sem emojis`", delete_after=5)
+            return
+        await ctx.send(" ".join(str(e) for e in ctx.guild.emojis[:60]) or "`sem emojis`")
+    except Exception as e:
+        await ctx.send(f"`emojis falhou: {e}`", delete_after=5)
+
+
+# ============================ DIVERSÃO ============================
+@bot.command(name="poll")
+async def m_poll(ctx, *, args: str):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    try:
+        parts = [p.strip() for p in args.split("|")]
+        pergunta = parts[0]
+        respostas = parts[1:] or ["sim", "nao"]
+        poll = discord.Poll(question=pergunta[:300], multiple=False)
+        for r in respostas[:10]:
+            poll.add_answer(text=r[:55])
+        await ctx.send(poll=poll)
+    except Exception as e:
+        await ctx.send(f"`poll falhou: {e}`", delete_after=5)
+
+
+@bot.command(name="say")
+async def m_say(ctx, *, texto: str):
+    if not await _check_ok(ctx):
+        return
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+    await ctx.send(texto)
+
+
+@bot.command(name="calc")
+async def m_calc(ctx, *, expr: str):
+    if not await _check_ok(ctx):
+        return
+    try:
+        expr2 = expr.replace("x", "*").replace(",", ".")
+        if not re.fullmatch(r"[0-9+\-*/().% ]+", expr2):
+            await ctx.send("`expressao invalida`", delete_after=5)
+            return
+        resultado = eval(expr2, {"__builtins__": {}}, {})
+        await ctx.send(f"`{expr} = {resultado}`", delete_after=10)
+    except Exception as e:
+        await ctx.send(f"`calc erro: {e}`", delete_after=5)
+
+
+@bot.command(name="roll")
+async def m_roll(ctx, n: int = 100):
+    if not await _check_ok(ctx):
+        return
+    n = max(2, min(n, 1_000_000))
+    await ctx.send(f"`🎲 {random.randint(1, n)}`", delete_after=10)
+
+
+# ============================ NUKE (off no set society) ============================
+@bot.command(name="nuke")
+async def m_nuke(ctx, canal: discord.TextChannel = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    if await _nuke_guard(ctx):
+        return
+    canal = canal or ctx.channel
+    try:
+        nome, parent = canal.name, canal.category
+        pos = canal.position
+        novo = await canal.clone(name=nome, category=parent)
+        await canal.delete()
+        try:
+            await novo.edit(position=pos)
+        except Exception:
+            pass
+        await ctx.send(f"💥 #{nome} renascido", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"`nuke falhou: {e}`", delete_after=5)
+
+
+# ============================ AUTO-ROLE ============================
+@bot.event
+async def on_member_join(member):
+    try:
+        # set society: membro novo ganha o cargo member (precisa de server members intent)
+        if member.guild.id in (1539791937291419650,):
+            role = member.guild.get_role(1539797800932610068)
+            if role is not None:
+                await member.add_roles(role)
+                await _log_mod(member.guild, f"autore: {member} entrou e levou {role.name}")
+    except Exception as e:
+        print(f"[autore] falha: {e}", flush=True)
 
 
 
