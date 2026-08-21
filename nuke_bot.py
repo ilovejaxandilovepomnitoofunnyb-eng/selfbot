@@ -519,30 +519,53 @@ async def ping(ctx):
 
 
 # ============================ ENVIO / VIEW ============================
+MENTIONS_SEM_PING = discord.AllowedMentions(everyone=False, users=False, roles=False)
+_last_burst_error = ""
+
+
 async def _burst_send(channel, n: int, base: str | None) -> int:
     """MESMO envio da v3.1: payload original (com @everyone em TODAS + URL do GIF
-    no fim), sleep 0.008. Proteção mínima: 429 com retry alarmante (>10s) para
-    o loop (mention budget exaurido) — retry curto espera e continua.
-    Cada msg também leva o GIF strobe anexado. Retorna quantas de fato passaram."""
+    no fim), sleep 0.008. 429 grande (mention budget exaurido) -> continua o
+    resto SEM ping em vez de abortar. Cada msg leva o GIF strobe anexado.
+    Retorna quantas de fato passaram; detalhe do erro fica em _last_burst_error."""
+    global _last_burst_error
     ok = 0
+    sem_ping = False
+    espera_total = 0.0
+    _last_burst_error = ""
     for _ in range(n):
         try:
             if base:
                 msg = f"{base}\n\n{SOCIETY_LINE}\ndiscord.gg/TGaUktD9D\n{GIF_CUSTOM_URLS[0]}"
             else:
                 msg = build_nuke_payload()
-            await channel.send(msg, allowed_mentions=MENTIONS, file=_gif_file())
+            await channel.send(msg[:2000], allowed_mentions=MENTIONS_SEM_PING if sem_ping else MENTIONS,
+                               file=_gif_file())
             ok += 1
         except discord.HTTPException as e:
             if e.status == 429:
                 ra = getattr(e, "retry_after", None) or 1.0
-                if ra > 10.0:
+                if ra > 10.0 and not sem_ping:
+                    sem_ping = True
+                    _last_burst_error = f"ping budget estourou ({ra:.0f}s) — continuando sem @everyone"
+                    print(f"[burst] {_last_burst_error}", flush=True)
+                    await asyncio.sleep(min(ra, 20))
+                    espera_total += min(ra, 20)
+                    continue
+                if espera_total > 60:
+                    _last_burst_error = f"rate limit {ra:.0f}s — parado apos {espera_total:.0f}s de espera"
+                    print(f"[burst] {_last_burst_error}", flush=True)
                     break
-                await asyncio.sleep(ra)
+                await asyncio.sleep(min(ra, 30))
+                espera_total += min(ra, 30)
+                continue
             else:
-                print(f"[burst] HTTP {e.status}", flush=True)
+                _last_burst_error = f"HTTP {e.status}: {str(e)[:180]}"
+                print(f"[burst] HTTP {e.status}: {e}", flush=True)
                 break
-        except Exception:
+        except Exception as e:
+            _last_burst_error = f"{type(e).__name__}: {str(e)[:180]}"
+            print(f"[burst] {type(e).__name__}: {e}", flush=True)
             break
         await asyncio.sleep(0.008)
     return ok
@@ -589,14 +612,20 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
     base = texto.strip() if texto.strip() else None
     target = ctx.channel
     n = await _burst_send(target, vezes, base)
+    if n < vezes:
+        _status_push({"tipo": "burst_fail", "canal": getattr(target, "name", "?"),
+                      "pedidos": vezes, "enviados": n,
+                      "erro": _last_burst_error,
+                      "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    detalhe = f"\n⚠️ {_last_burst_error}" if _last_burst_error else ""
     view = SpamView(target=target, base=base, total=n, timeout=300)
     try:
         await ctx.followup.send(
-            f"💥 **{n} msgs** em {target.mention} — spam +10 no botão 👇",
+            f"💥 **{n}/{vezes} msgs** em {target.mention} — spam +10 no botão 👇{detalhe}",
             ephemeral=True, view=view)
     except Exception:
         try:
-            await ctx.send(f"✔ {n} msg", delete_after=5)
+            await ctx.send(f"✔ {n} msg{detalhe}", delete_after=15)
         except Exception:
             pass
 
