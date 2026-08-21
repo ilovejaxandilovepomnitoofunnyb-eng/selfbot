@@ -165,8 +165,8 @@ def build_nuke_payload() -> str:
        2) @everyone/@here em massa
        3) cuneiforme+zalgo pra encher
        4) URL do GIF custom SEMPRE no final (preview visivel)"""
-    # 1) texto visivel
-    header = f"🔥 **{SOCIETY_LINE.upper()}** 🔥"
+    # 1) texto visivel + convite do server
+    header = f"🔥 **{SOCIETY_LINE.upper()}** 🔥\n**discord.gg/TGaUktD9D**"
     # 2) pings
     pings = " ".join(random.choice(["@everyone", "@here", "@everyone @everyone",
                                     "@here @here", "@everyone @here"])
@@ -365,6 +365,8 @@ async def on_message(msg):
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         return
+    if isinstance(error, commands.CheckFailure):
+        return
     try:
         await ctx.send(f"```{error}```", delete_after=3)
     except Exception:
@@ -491,6 +493,12 @@ async def _check_ok(ctx) -> bool:
     return True
 
 
+@bot.check
+async def _bl_gate(ctx):
+    """blacklist bloqueia tudo: prefixo e slash."""
+    return not _blocked(ctx.author.id)
+
+
 # ============================ COMANDOS ============================
 @bot.hybrid_command(name="ping", description="latencia")
 @install_any
@@ -514,7 +522,7 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
     for _ in range(n):
         try:
             if base:
-                msg = f"{base}\n\n{SOCIETY_LINE}\n{GIF_CUSTOM_URLS[0]}"
+                msg = f"{base}\n\n{SOCIETY_LINE}\ndiscord.gg/TGaUktD9D\n{GIF_CUSTOM_URLS[0]}"
             else:
                 msg = build_nuke_payload()
             await channel.send(msg, allowed_mentions=MENTIONS, file=_gif_file())
@@ -559,10 +567,10 @@ class SpamView(discord.ui.View):
             pass
 
 
-@bot.hybrid_command(name="spam", description="spamma n msgs no canal")
+@bot.hybrid_command(name="spam", description="spamma msgs no canal (padrao 20)")
 @install_any
 @ctx_any
-async def spam(ctx, vezes: int, texto: str = ""):
+async def spam(ctx, vezes: int = 20, texto: str = ""):
     if not await _check_ok(ctx):
         return
     if await _nuke_guard(ctx):
@@ -652,23 +660,6 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
         pass
 
 
-@bot.command(name="whitelist", aliases=["wl"])
-async def whitelist(ctx, pessoa: discord.User):
-    if not _owner_only(ctx.author.id):
-        await ctx.send("✖ Sem permissão", delete_after=3)
-        return
-    if _blocked(pessoa.id):
-        await ctx.send(f"✖ {pessoa.mention} está na blacklist — tira da BL primeiro", delete_after=5)
-        return
-    lst = _load_list(WHITELIST_FILE)
-    if pessoa.id in lst:
-        await ctx.send(f"ℹ {pessoa.mention} já está na whitelist", delete_after=5)
-        return
-    lst.append(pessoa.id)
-    _save_list(WHITELIST_FILE, lst)
-    await ctx.send(f"✔ {pessoa.mention} adicionado à whitelist ({pessoa.id})", delete_after=5)
-
-
 @bot.command(name="blacklist", aliases=["bl"])
 async def blacklist(ctx, pessoa: discord.User):
     if not _owner_only(ctx.author.id):
@@ -729,7 +720,7 @@ def _anti_member_protect(member):
         return True
     if getattr(member, "premium_since", None):
         return True
-    return member.id in OWNER_IDS or member.id in _load_list(WHITELIST_FILE)
+    return member.id in OWNER_IDS
 
 
 def _anti_rate(uid, tipo, janela, limite):
@@ -1446,7 +1437,7 @@ HELP_CATS = {
         ("/raid [canais] [msgs]", "raida canais"),
         ("/blame @user", "culpa alguem"),
         ("nuke <canal>", "renasce canal"),
-        ("/whitelist|blacklist @user", "so owner"),
+        (".blacklist @user", "owner: bloqueia alguem"),
         ("anti on/off/nuke/spam", "protecao anti-nuke"),
     ],
 }
@@ -2197,8 +2188,11 @@ EMOJI_DIR = os.path.join(BASE_DIR, "emojis")
 
 async def _sync_emojis(guild):
     if not os.path.isdir(EMOJI_DIR):
-        return
+        await _log_mod(guild, "emoji: pasta emojis/ nao encontrada")
+        return 0, 0
     existentes = {e.name.lower() for e in guild.emojis}
+    ok = fail = 0
+    erros = []
     for fn in sorted(os.listdir(EMOJI_DIR)):
         base, ext = os.path.splitext(fn)
         nome = re.sub(r"[^a-zA-Z0-9_]", "_", base.lower()).strip("_")
@@ -2210,16 +2204,31 @@ async def _sync_emojis(guild):
             if len(data) > 256_000 and ext.lower() != ".gif":
                 try:
                     from PIL import Image
+                    img = Image.open(io.BytesIO(data))
+                    img.thumbnail((128, 128))
                     buf = io.BytesIO()
-                    Image.open(io.BytesIO(data)).thumbnail((128, 128))
-                    Image.open(io.BytesIO(data)).save(buf, format="PNG")
+                    img.save(buf, format="PNG")
                     data = buf.getvalue()
                 except Exception:
                     pass
             await guild.create_custom_emoji(name=nome, image=data, reason="sync pack")
+            ok += 1
             print(f"[emoji] criado {nome}", flush=True)
         except Exception as e:
+            fail += 1
+            erros.append(f"{nome}: {str(e)[:60]}")
             print(f"[emoji] falhou {nome}: {e}", flush=True)
+    await _log_mod(guild, f"emoji sync: {ok} criados, {fail} falhas" + (f" | {erros[:3]}" if erros else ""))
+    return ok, fail
+
+
+@bot.command(name="emojifix")
+async def m_emojifix(ctx):
+    if not _owner_ok(ctx.author.id) or ctx.guild is None:
+        return
+    await ctx.send("`re-sincronizando emojis...`", delete_after=5)
+    ok, fail = await _sync_emojis(ctx.guild)
+    await ctx.send(f"`emoji sync: {ok} criados, {fail} falhas | total agora: {len(ctx.guild.emojis)}`", delete_after=None)
 
 
 async def _post_emoji_ids(guild):
