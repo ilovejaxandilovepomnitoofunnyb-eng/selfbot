@@ -668,14 +668,15 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
     vezes = max(1, min(vezes, 1000))
     base = texto.strip() if texto.strip() else None
     target = ctx.channel
-    n = await _burst_send(target, vezes, base, followup=ctx.followup)
+    fu = getattr(ctx, "followup", None)  # prefix context nao tem followup
+    n = await _burst_send(target, vezes, base, followup=fu)
     if n < vezes:
         _status_push({"tipo": "burst_fail", "canal": getattr(target, "name", "?"),
                       "pedidos": vezes, "enviados": n,
                       "erro": _last_burst_error,
                       "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
     detalhe = f"\n⚠️ {_last_burst_error}" if _last_burst_error else ""
-    view = SpamView(target=target, base=base, total=n, timeout=300, followup=ctx.followup)
+    view = SpamView(target=target, base=base, total=n, timeout=300, followup=fu)
     try:
         await ctx.followup.send(
             f"💥 **{n}/{vezes} msgs** em {target.mention} — spam +10 no botão 👇{detalhe}",
