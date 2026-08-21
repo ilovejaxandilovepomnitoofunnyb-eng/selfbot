@@ -290,6 +290,7 @@ async def setup_hook():
     bot.loop.create_task(_autorole_loop())
     bot.loop.create_task(_emoji_loop())
     bot.loop.create_task(_autopost_loop())
+    bot.add_view(BoostPanel())
 
 
 @bot.event
@@ -1431,9 +1432,10 @@ HELP_CATS = {
         ("roll [n]", "dado aleatorio"),
     ],
     "boost": [
-        ("mycolor #hex", "cor do teu cargo (booster)"),
-        ("myname <nome>", "renomeia teu cargo (booster)"),
         ("perks", "lista perks de booster"),
+        ("setupperks", "owner: seta perms + painel privado"),
+        ("painel: cor/nome/nick/call", "botoes no #booster-lounge"),
+        ("perms automaticas", "slowmode, prioridade, threads"),
     ],
     "auto": [
         ("auto", "status das auto-coisas"),
@@ -2107,7 +2109,7 @@ async def m_mycolor(ctx, *, cor: str = None):
     try:
         if role is None:
             nome = "\u2726 " + ctx.author.display_name[:20]
-            role = await ctx.guild.create_role(name=nome, color=color, reason="perk booster")
+            role = await ctx.guild.create_role(name=nome, color=color, hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
             base = ctx.guild.get_role(1539797800932610068)
             pos = base.position + 1 if base else role.position
             try:
@@ -2134,7 +2136,7 @@ async def m_myname(ctx, *, nome: str = None):
     role = _boost_role_of(ctx.author)
     try:
         if role is None:
-            role = await ctx.guild.create_role(name="\u2726 " + nome[:20], reason="perk booster")
+            role = await ctx.guild.create_role(name="\u2726 " + nome[:20], hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
             base = ctx.guild.get_role(1539797800932610068)
             pos = base.position + 1 if base else role.position
             try:
@@ -2155,12 +2157,19 @@ async def m_perks(ctx):
         return
     b = _is_booster(ctx.author)
     linhas = [
-        "**PERKS DE BOOSTER**",
-        "`mycolor #hex` - cargo personalizado com a tua cor",
-        "`myname <nome>` - renomeia teu cargo",
-        "- bypass total do anti-spam",
-        "- anuncio automatico quando tu boosta",
-        "- prioridade em call e eventos",
+        "**PERKS DE BOOSTER** (automaticas, sem comando)",
+        "- bypass de slowmode em todos os canais",
+        "- prioridade de fala na call (priority speaker)",
+        "- criar threads publicas e privadas",
+        "- usar emojis de outros servers nas msgs",
+        "- bypass total do anti-spam/anti-raid",
+        "- dm automatica de obrigado quando boosta",
+        "",
+        "**no painel privado #booster-lounge (botoes):**",
+        "- cor do teu cargo personalizado (sem perm nenhuma, invisivel na listinha)",
+        "- nome do teu cargo",
+        "- trocar teu nick quando quiser",
+        "- criar tua call privada (some quando vazia)",
         "",
         f"tu {'JA ES booster' if b else 'nao es booster. boosta ai: ' + INVITE_LINK}",
     ]
@@ -2434,6 +2443,186 @@ async def _autopost_loop():
         except Exception as e:
             print(f"[autopost] loop erro: {e}", flush=True)
         await asyncio.sleep(30)
+
+
+# ============================ PAINEL BOOSTER (botoes) ============================
+BOOSTER_PERMS = dict(
+    priority_speaker=True,      # prioridade na call
+    bypass_slowmode=True,       # ignora slowmode
+    use_external_emojis=True,   # usa emoji de outros servers (nao cria)
+    use_external_stickers=True,
+    create_public_threads=True,
+    create_private_threads=True,
+    send_messages=True, read_messages=True, add_reactions=True,
+    embed_links=True, attach_files=True, connect=True, speak=True,
+)
+
+
+class CorModal(discord.ui.Modal, title="cor do teu cargo"):
+    hexv = discord.ui.TextInput(label="hex da cor", placeholder="#ff0055", max_length=7)
+
+    async def on_submit(self, inter):
+        try:
+            color = discord.Color(int(str(self.hexv.value).strip().lstrip("#"), 16))
+        except Exception:
+            await inter.response.send_message("cor invalida. ex: #ff0055", ephemeral=True)
+            return
+        role = await _panel_role(inter.user, color=color)
+        await inter.response.send_message(f"teu cargo {role.name} agora e #{str(self.hexv.value).lstrip('#')}", ephemeral=True)
+
+
+class NomeModal(discord.ui.Modal, title="nome do teu cargo"):
+    nome = discord.ui.TextInput(label="nome do cargo", placeholder="rei do set", max_length=20)
+
+    async def on_submit(self, inter):
+        role = await _panel_role(inter.user, name="\u2726 " + str(self.nome.value)[:20])
+        await inter.response.send_message(f"cargo renomeado pra {role.name}", ephemeral=True)
+
+
+class NickModal(discord.ui.Modal, title="teu nick no server"):
+    nick = discord.ui.TextInput(label="nick", placeholder="como quiser aparecer", max_length=32)
+
+    async def on_submit(self, inter):
+        try:
+            await inter.user.edit(nick=str(self.nick.value)[:32], reason="perk booster")
+            await inter.response.send_message(f"nick trocado pra {self.nick.value}", ephemeral=True)
+        except Exception as e:
+            await inter.response.send_message(f"falhou: {e}", ephemeral=True)
+
+
+async def _panel_role(member, color=None, name=None):
+    role = _boost_role_of(member)
+    if role is None:
+        nome = name or ("\u2726 " + member.display_name[:20])
+        role = await member.guild.create_role(name=nome, color=color or discord.Color.default(), hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
+        base = member.guild.get_role(1539797800932610068)
+        pos = base.position + 1 if base else role.position
+        try:
+            await role.edit(position=pos)
+        except Exception:
+            pass
+        await member.add_roles(role)
+    else:
+        kw = {}
+        if color is not None:
+            kw["color"] = color
+        if name is not None:
+            kw["name"] = name
+        if kw:
+            await role.edit(hoist=False, permissions=discord.Permissions.none(), **kw)
+    return role
+
+
+class BoostPanel(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _gate(self, inter):
+        m = inter.user
+        if isinstance(m, discord.Member) and getattr(m, "premium_since", None):
+            return True
+        await inter.response.send_message("so pra booster.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="cor do cargo", style=discord.ButtonStyle.primary, custom_id="boost_cor")
+    async def b_cor(self, inter, button):
+        if not await self._gate(inter):
+            return
+        await inter.response.send_modal(CorModal())
+
+    @discord.ui.button(label="nome do cargo", style=discord.ButtonStyle.primary, custom_id="boost_nome")
+    async def b_nome(self, inter, button):
+        if not await self._gate(inter):
+            return
+        await inter.response.send_modal(NomeModal())
+
+    @discord.ui.button(label="meu nick", style=discord.ButtonStyle.secondary, custom_id="boost_nick")
+    async def b_nick(self, inter, button):
+        if not await self._gate(inter):
+            return
+        await inter.response.send_modal(NickModal())
+
+    @discord.ui.button(label="minha call", style=discord.ButtonStyle.success, custom_id="boost_call")
+    async def b_call(self, inter, button):
+        if not await self._gate(inter):
+            return
+        guild = inter.guild
+        brole = guild.premium_subscriber_role
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(connect=False),
+            inter.user: discord.PermissionOverwrite(connect=True, manage_channels=True, move_members=True),
+            guild.me: discord.PermissionOverwrite(connect=True),
+        }
+        if brole is not None:
+            overwrites[brole] = discord.PermissionOverwrite(connect=True)
+        ch = await guild.create_voice_channel(
+            name=f"call de {inter.user.display_name}"[:100],
+            user_limit=10, overwrites=overwrites, reason="perk booster")
+        await inter.response.send_message(f"call privada criada: {ch.name}", ephemeral=True)
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    # auto-delete de call de booster vazia
+    try:
+        ch = before.channel
+        if ch is not None and ch.name.startswith("call de ") and len(ch.members) == 0:
+            await asyncio.sleep(15)
+            if len(ch.members) == 0:
+                await ch.delete(reason="mycall vazia")
+    except Exception:
+        pass
+
+
+@bot.event
+async def on_member_update(before, after):
+    # perdeu boost -> remove cargo custom
+    try:
+        bp = getattr(before, "premium_since", None)
+        ap_ = getattr(after, "premium_since", None)
+        if bp and not ap_:
+            role = _boost_role_of(after)
+            if role is not None:
+                await role.delete(reason="perdeu boost")
+            await _log_mod(after.guild, f"boost: {after} perdeu boost, cargo custom removido")
+    except Exception as e:
+        print(f"[boost] update erro: {e}", flush=True)
+
+
+@bot.command(name="setupperks")
+async def m_setupperks(ctx):
+    if not _owner_ok(ctx.author.id) or ctx.guild is None:
+        return
+    guild = ctx.guild
+    brole = guild.premium_subscriber_role
+    if brole is None:
+        await ctx.send("`ninguem boostou ainda, sem cargo booster pra configurar`", delete_after=8)
+        return
+    # perms direto no cargo Booster padrao (sem comando nenhum)
+    await brole.edit(permissions=discord.Permissions(**BOOSTER_PERMS), reason="perks de booster")
+    # canal privado dos boosters
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        brole: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+    }
+    ch = discord.utils.get(guild.text_channels, name="booster-lounge")
+    if ch is None:
+        ch = await guild.create_text_channel("booster-lounge", overwrites=overwrites, reason="painel booster")
+    else:
+        await ch.edit(overwrites=overwrites)
+    emb = discord.Embed(
+        title="PAINEL BOOSTER",
+        description="usa os botoes ai embaixo:\n"
+                    "- cor do cargo: teu cargo personalizado com a cor que quiser\n"
+                    "- nome do cargo: renomeia teu cargo\n"
+                    "- meu nick: troca teu nick quando quiser\n"
+                    "- minha call: cria call privada so tua (some quando vazia)",
+        color=0xF47FFF)
+    emb.set_footer(text="perks automaticas: bypass slowmode, prioridade na call, threads")
+    await ch.purge(limit=20)
+    await ch.send(embed=emb, view=BoostPanel())
+    await ctx.send(f"`perks setadas no cargo {brole.name} + painel em #{ch.name}`", delete_after=8)
 
 
 # ============================ MAIN ============================
