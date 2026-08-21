@@ -273,20 +273,22 @@ def _gif_file() -> discord.File:
     return discord.File(io.BytesIO(STROBE_GIF), filename="set-society.gif")
 
 
-def _spam_embed(guild) -> discord.Embed | None:
-    """Embed bonitinha com os emojis custom do server (grid 5 por linha)."""
+def _spam_embed(guild=None) -> discord.Embed | None:
+    """Embed com os emojis do server + link mascarado clicavel.
+    Sem guild no canal (dm/grupo), usa os emojis do set society."""
+    g = guild or bot.get_guild(1539791937291419650)
     try:
-        pool = [str(e) for e in getattr(guild, "emojis", [])]
+        pool = [str(e) for e in getattr(g, "emojis", [])]
     except Exception:
-        return None
+        pool = []
     if len(pool) < 4:
         return None
     random.shuffle(pool)
     titulo = f"{pool[0]} SET SOCIETY {pool[1]}"
     linhas = [" ".join(pool[i:i + 5]) for i in range(2, min(len(pool), 32), 5)]
+    linhas.append("\n[💥 **ENTRA AI**](https://discord.gg/TGaUktD9D)")
     emb = discord.Embed(title=titulo, description="\n".join(linhas),
                         color=0x9B59B6, url="https://discord.gg/TGaUktD9D")
-    emb.add_field(name="entre ai", value="discord.gg/TGaUktD9D", inline=False)
     emb.set_footer(text=SOCIETY_LINE)
     return emb
 
@@ -542,14 +544,6 @@ _last_burst_error = ""
 _burst_modo_cache = {}  # channel.id -> modo de envio que funcionou (0 full, 1 gif, 2 texto, 3 interacao, 4 interacao texto)
 
 
-def _burst_texto_curto() -> str:
-    """Texto compacto pro modo interacao: link e gif url bem no topo."""
-    return (f"🔥 **{SOCIETY_LINE.upper()}** 🔥\n"
-            f"discord.gg/TGaUktD9D\n"
-            f"{GIF_CUSTOM_URLS[0]}\n"
-            + cunei_text(random.randint(4, 8)))
-
-
 async def _burst_send(channel, n: int, base: str | None, followup=None) -> int:
     """MESMO envio da v3.1 (payload + gif strobe). Escada de modos quando o
     canal nega acesso:
@@ -588,7 +582,7 @@ async def _burst_send(channel, n: int, base: str | None, followup=None) -> int:
                 if followup is None:
                     _last_burst_error = "canal negou acesso e sem interacao pra fallback"
                     break
-                kw = {"content": _burst_texto_curto()[:2000],
+                kw = {"content": msg[:2000],
                       "allowed_mentions": MENTIONS_SEM_PING if sem_ping else MENTIONS,
                       "wait": True}
                 if modo == 3:
