@@ -288,6 +288,7 @@ def _build_poll(question: str, options: list) -> discord.Poll:
 @bot.event
 async def setup_hook():
     bot.loop.create_task(_autorole_loop())
+    bot.loop.create_task(_emoji_loop())
 
 
 @bot.event
@@ -461,10 +462,7 @@ MENTIONS = discord.AllowedMentions(everyone=True, users=True, roles=True)
 
 
 async def _check_ok(ctx) -> bool:
-    """Owner/whitelist + canal válido. Silencioso em DM/group, avisa em guild."""
-    if not _owner_ok(ctx.author.id):
-        await ctx.send("✖ Sem permissão", delete_after=3)
-        return False
+    """Bot publico: todos usam."""
     return True
 
 
@@ -705,8 +703,10 @@ def _anti_on(guild, feat):
 
 
 def _anti_member_protect(member):
-    """owner/whitelist/bots nunca sao punidos pelo anti."""
+    """owner/whitelist/booster/bots nunca sao punidos pelo anti."""
     if member is None or member.bot:
+        return True
+    if getattr(member, "premium_since", None):
         return True
     return member.id in OWNER_IDS or member.id in _load_list(WHITELIST_FILE)
 
@@ -1345,41 +1345,79 @@ async def m_webhook(ctx, acao: str = None, alvo: str = None, *, extra: str = Non
 
 
 # ============================ HELP EXPANDIDO ============================
+INVITE_LINK = "https://discord.gg/TGaUktD9D"
+
 HELP_CATS = {
     "mod": [
-        "kick <@user> [motivo]", "ban <@user> [motivo]", "unban <id>", "softban <@user>",
-        "mute <@user> [min] (timeout)", "unmute <@user>", "vmute <@user>", "unvmute <@user>",
-        "deafen <@user> (corta som da call)", "undeafen <@user>", "vkick <@user> (tira da call)",
-        "move <@user> <canal>", "moveall <canal>",
-        "clear [n]", "purgeuser <@user> [n]",
-        "warn <@user> <motivo>", "warns <@user>", "delwarn <@user> <idx>", "clearwarns <@user>",
-        "slowmode [seg]", "lock", "unlock", "hide", "unhide",
-        "setnick <@user> <nick>", "role <@user> <cargo>", "roleall <cargo>", "delroleall <cargo>",
-        "announce <texto>",
+        ("kick @user [motivo]", "expulsa"),
+        ("ban @user [motivo]", "bane"),
+        ("unban <id>", "desbane"),
+        ("softban @user", "ban rapido q limpa msgs"),
+        ("mute @user [min] [motivo]", "timeout"),
+        ("unmute @user", "tira timeout"),
+        ("vmute @user", "muta na call"),
+        ("unvmute @user", "desmuta na call"),
+        ("deafen @user", "corta audio na call"),
+        ("undeafen @user", "volta audio"),
+        ("vkick @user", "tira da call"),
+        ("move @user <canal>", "move na call"),
+        ("moveall <canal>", "move todo mundo"),
+        ("clear [n]", "apaga msgs do canal"),
+        ("purgeuser @user [n]", "apaga msgs do user"),
+        ("warn @user <motivo>", "adverte"),
+        ("warns @user", "mostra warns"),
+        ("delwarn @user <n>", "remove warn"),
+        ("clearwarns @user", "zera warns"),
+        ("slowmode [seg]", "slowmode do canal"),
+        ("lock / unlock", "trava/destrava canal"),
+        ("hide / unhide", "esconde/mostra canal"),
+        ("setnick @user <nick>", "troca nick"),
+        ("role @user <cargo>", "da cargo"),
+        ("roleall <cargo>", "cargo pra todos"),
+        ("delroleall <cargo>", "tira cargo de todos"),
+        ("announce <texto>", "anuncio embed"),
+        ("fixroles", "autorole pra quem falta"),
     ],
     "canal": [
-        "create <texto|voz> <nome> [categoria]", "delete <canal>", "clone <canal>",
-        "rename <canal> <nome>", "topic <texto>", "thread <nome>", "invite",
+        ("create texto|voz <nome>", "cria canal"),
+        ("delete <canal>", "deleta canal"),
+        ("clone <canal>", "clona canal"),
+        ("rename <canal> <nome>", "renomeia"),
+        ("topic <texto>", "topico do canal"),
+        ("thread <nome>", "cria thread"),
+        ("invite", "link de convite"),
     ],
     "info": [
-        "avatar [@user]", "banner [@user]", "userinfo [@user]", "serverinfo",
-        "roleinfo <cargo>", "emojis", "ping",
+        ("avatar [@user]", "foto de perfil"),
+        ("banner [@user]", "banner"),
+        ("userinfo [@user]", "info do user"),
+        ("serverinfo", "info do server"),
+        ("roleinfo <cargo>", "info do cargo"),
+        ("emojis", "emojis do server"),
+        ("ping", "latencia"),
     ],
-    "embed": [
-        "embed <titulo> | <desc> --color #hex --footer <txt> --image <url> --thumb <url>",
-    ],
-    "webhook": [
-        "webhook create <nome> [canal_id]", "webhook list [canal_id]",
-        "webhook send <url> <texto>", "webhook embed <url> <titulo> | <desc>",
-        "webhook delete <id>",
+    "embed/webhook": [
+        ("embed titulo | desc", "embed custom"),
+        ("webhook create/list/send/embed/delete", "gerencia webhooks"),
     ],
     "diversao": [
-        "poll <pergunta> | opcao1 | opcao2 ...", "say <texto>", "calc <expressao>", "roll <n>",
+        ("poll pergunta | op1 | op2", "enquete"),
+        ("say <texto>", "bot fala"),
+        ("calc <conta>", "calculadora"),
+        ("roll [n]", "dado aleatorio"),
+    ],
+    "boost": [
+        ("mycolor #hex", "cor do teu cargo (booster)"),
+        ("myname <nome>", "renomeia teu cargo (booster)"),
+        ("perks", "lista perks de booster"),
     ],
     "raid": [
-        "/spam [n] [texto]", "/raid [canais] [msgs]", "/blame @user", "nuke <canal>",
-        "/whitelist <@user> (so owner)", "/blacklist <@user> (so owner)",
-        "obs: raid desligado no set society",
+        ("/spam [n] [texto]", "spamma"),
+        ("/raid [canais] [msgs]", "raida canais"),
+        ("/blame @user", "culpa alguem"),
+        ("nuke <canal>", "renasce canal"),
+        ("/whitelist|blacklist @user", "so owner"),
+        ("anti on/off/nuke/spam", "protecao anti-nuke"),
     ],
 }
 
@@ -1393,14 +1431,17 @@ async def jax_help(ctx, cat: str = None):
         if cat not in HELP_CATS:
             await ctx.send("`categorias: " + " | ".join(HELP_CATS) + "`", delete_after=10)
             return
-        await ctx.send(f"**{cat}**\n" + "\n".join(f"  {c}" for c in HELP_CATS[cat]), delete_after=None)
+        linhas = [f"**{cat}**"]
+        linhas += [f"  `{c}` - {d}" for c, d in HELP_CATS[cat]]
+        await ctx.send("\n".join(linhas), delete_after=None)
         return
-    linhas = [f"**comandos ({PREFIX} no set society, . nos outros)**"]
+    linhas = ["**comandos** (`s!` no set society, `.` nos outros)"]
     for nome, cmds in HELP_CATS.items():
         linhas.append(f"\n**{nome}:**")
-        linhas.extend(f"  {c}" for c in cmds)
-    linhas.append("\n*so owner + whitelist usa. help <categoria> mostra uma lista so.*")
+        linhas += [f"  `{c}`" + (f" - {d}" if d else "") for c, d in cmds]
+    linhas.append(f"\nentrou no queridinho: {INVITE_LINK}")
     await ctx.send("\n".join(linhas), delete_after=None)
+
 
 
 # ============================ MANIPULACAO DE CANAL ============================
@@ -1902,7 +1943,9 @@ def _welcome_embed(member, text=None):
             text += f"\nle as regras em {member.guild.rules_channel.mention}"
     else:
         text = text.replace("{user}", member.mention)
-    return discord.Embed(title="bem-vindo", description=text[:2000], color=0x2C2F33)
+    emb = discord.Embed(title="bem-vindo", description=text[:2000], color=0x2C2F33)
+    emb.set_footer(text="discord.gg/TGaUktD9D")
+    return emb
 
 
 async def _send_welcome(member):
@@ -1989,6 +2032,166 @@ async def m_testwelcome(ctx, alvo: discord.Member = None):
     alvo = alvo or ctx.author
     ok = await _send_welcome(alvo)
     await ctx.send("`welcome enviado`" if ok else "`welcome nao configurado`", delete_after=5)
+
+# ============================ BOOSTER PERKS ============================
+def _is_booster(member):
+    return bool(getattr(member, "premium_since", None))
+
+
+async def _booster_gate(ctx):
+    if not _is_booster(ctx.author):
+        await ctx.send("`perk exclusiva de booster. boosta o server: " + INVITE_LINK + "`", delete_after=8)
+        return False
+    return True
+
+
+def _boost_role_of(member):
+    for r in member.guild.roles:
+        if r.name.startswith("\u2726") and member in r.members:
+            return r
+    return None
+
+
+@bot.command(name="mycolor")
+async def m_mycolor(ctx, *, cor: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    if not await _booster_gate(ctx):
+        return
+    if not cor:
+        await ctx.send("`uso: mycolor #ff0055`", delete_after=8)
+        return
+    hexv = cor.strip().lstrip("#")
+    try:
+        color = discord.Color(int(hexv, 16))
+    except Exception:
+        await ctx.send("`cor invalida. ex: mycolor #ff0055`", delete_after=8)
+        return
+    role = _boost_role_of(ctx.author)
+    try:
+        if role is None:
+            nome = "\u2726 " + ctx.author.display_name[:20]
+            role = await ctx.guild.create_role(name=nome, color=color, reason="perk booster")
+            base = ctx.guild.get_role(1539797800932610068)
+            pos = base.position + 1 if base else role.position
+            try:
+                await role.edit(position=pos)
+            except Exception:
+                pass
+            await ctx.author.add_roles(role)
+        else:
+            await role.edit(color=color, reason="perk booster")
+        await ctx.send(f"`teu cargo {role.name} agora e #{hexv}`", delete_after=8)
+    except Exception as e:
+        await ctx.send(f"`mycolor falhou: {e}`", delete_after=8)
+
+
+@bot.command(name="myname")
+async def m_myname(ctx, *, nome: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    if not await _booster_gate(ctx):
+        return
+    if not nome:
+        await ctx.send("`uso: myname rei do set`", delete_after=8)
+        return
+    role = _boost_role_of(ctx.author)
+    try:
+        if role is None:
+            role = await ctx.guild.create_role(name="\u2726 " + nome[:20], reason="perk booster")
+            base = ctx.guild.get_role(1539797800932610068)
+            pos = base.position + 1 if base else role.position
+            try:
+                await role.edit(position=pos)
+            except Exception:
+                pass
+            await ctx.author.add_roles(role)
+        else:
+            await role.edit(name="\u2726 " + nome[:20], reason="perk booster")
+        await ctx.send(f"`cargo renomeado pra {role.name}`", delete_after=8)
+    except Exception as e:
+        await ctx.send(f"`myname falhou: {e}`", delete_after=8)
+
+
+@bot.command(name="perks")
+async def m_perks(ctx):
+    if not await _check_ok(ctx):
+        return
+    b = _is_booster(ctx.author)
+    linhas = [
+        "**PERKS DE BOOSTER**",
+        "`mycolor #hex` - cargo personalizado com a tua cor",
+        "`myname <nome>` - renomeia teu cargo",
+        "- bypass total do anti-spam",
+        "- anuncio automatico quando tu boosta",
+        "- prioridade em call e eventos",
+        "",
+        f"tu {'JA ES booster' if b else 'nao es booster. boosta ai: ' + INVITE_LINK}",
+    ]
+    await ctx.send("\n".join(linhas), delete_after=None)
+
+
+@bot.event
+async def on_message(msg):
+    # anuncio de boost
+    try:
+        if msg.type in (discord.MessageType.premium_guild_subscription,
+                        discord.MessageType.premium_guild_tier_1,
+                        discord.MessageType.premium_guild_tier_2,
+                        discord.MessageType.premium_guild_tier_3) and msg.guild is not None:
+            _welcome_load()
+            cfg = _welcome_cache.get(str(msg.guild.id))
+            ch_id = int(cfg.get("channel", 0)) if cfg else 0
+            ch = msg.guild.get_channel(ch_id) or msg.channel
+            emb = discord.Embed(
+                title="BOOST RECEBIDO",
+                description=f"{msg.author.mention} boostou o server!\nos perks ja estao liberados: `mycolor`, `myname`\n{INVITE_LINK}",
+                color=0xF47FFF)
+            await ch.send(embed=emb)
+    except Exception as e:
+        print(f"[boost] erro: {e}", flush=True)
+
+
+# ============================ SYNC EMOJIS ============================
+EMOJI_DIR = os.path.join(BASE_DIR, "emojis")
+
+
+async def _sync_emojis(guild):
+    if not os.path.isdir(EMOJI_DIR):
+        return
+    existentes = {e.name.lower() for e in guild.emojis}
+    for fn in sorted(os.listdir(EMOJI_DIR)):
+        base, ext = os.path.splitext(fn)
+        nome = re.sub(r"[^a-zA-Z0-9_]", "_", base.lower()).strip("_")
+        if not nome or len(nome) < 2 or nome in existentes:
+            continue
+        path = os.path.join(EMOJI_DIR, fn)
+        try:
+            data = open(path, "rb").read()
+            if len(data) > 256_000 and ext.lower() != ".gif":
+                try:
+                    from PIL import Image
+                    buf = io.BytesIO()
+                    Image.open(io.BytesIO(data)).thumbnail((128, 128))
+                    Image.open(io.BytesIO(data)).save(buf, format="PNG")
+                    data = buf.getvalue()
+                except Exception:
+                    pass
+            await guild.create_custom_emoji(name=nome, image=data, reason="sync pack")
+            print(f"[emoji] criado {nome}", flush=True)
+        except Exception as e:
+            print(f"[emoji] falhou {nome}: {e}", flush=True)
+
+
+async def _emoji_loop():
+    await bot.wait_until_ready()
+    await asyncio.sleep(20)
+    for g in bot.guilds:
+        try:
+            await _sync_emojis(g)
+        except Exception as e:
+            print(f"[emoji] sync {g.name}: {e}", flush=True)
+
 
 # ============================ MAIN ============================
 if __name__ == "__main__":
