@@ -668,7 +668,7 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
     vezes = max(1, min(vezes, 1000))
     base = texto.strip() if texto.strip() else None
     target = ctx.channel
-    fu = getattr(ctx, "followup", None)  # prefix context nao tem followup
+    fu = getattr(getattr(ctx, "interaction", None), "followup", None)  # slash -> interaction.followup; prefix -> None
     n = await _burst_send(target, vezes, base, followup=fu)
     if n < vezes:
         _status_push({"tipo": "burst_fail", "canal": getattr(target, "name", "?"),
