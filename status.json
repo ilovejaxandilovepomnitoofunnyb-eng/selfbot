@@ -1,8 +1,42 @@
 {
- "tipo": "boot",
- "bot": "Jax Fanboy#9893",
- "guilds": [
-  "Set Society(1539791937291419650)"
+ "tipo": "emoji_sync",
+ "guild": "Set Society",
+ "guild_id": 1539791937291419650,
+ "resultado": "0 criados, 0 falhas, total agora 31",
+ "erros": [],
+ "pasta_existe": true,
+ "arquivos": [
+  "animated_arrow_white.gif",
+  "canva.png",
+  "capcut.png",
+  "cs2.png",
+  "disney_plus.gif",
+  "emptybox.png",
+  "green_loading.gif",
+  "insta.gif",
+  "members.png",
+  "members_purple.png",
+  "minecraft.gif",
+  "minecraftbee.gif",
+  "money_with_wings.gif",
+  "moneywings.gif",
+  "netflix.png",
+  "nitro.gif",
+  "nitroo.gif",
+  "nord_vpn.png",
+  "offline.png",
+  "paymentblik.png",
+  "paypal.png",
+  "psc.png",
+  "red_loading.gif",
+  "redcard.gif",
+  "roblox.png",
+  "robux.png",
+  "shoppingcart.png",
+  "spotify.png",
+  "tiktokk.png",
+  "tools.png",
+  "twitch.png"
  ],
- "ts": "2026-08-21T03:13:54.860355+00:00"
+ "ts": "2026-08-21T03:14:14.750239+00:00"
 }
