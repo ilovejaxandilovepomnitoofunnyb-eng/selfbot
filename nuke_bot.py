@@ -542,11 +542,14 @@ _last_burst_error = ""
 _burst_modo_cache = {}  # channel.id -> modo de envio que funcionou (0 full, 1 gif, 2 texto)
 
 
-async def _burst_send(channel, n: int, base: str | None) -> int:
-    """MESMO envio da v3.1: payload original (com @everyone em TODAS + URL do GIF
-    no fim), sleep 0.008. 429 grande (mention budget exaurido) -> continua o
-    resto SEM ping em vez de abortar. Cada msg leva o GIF strobe anexado.
-    Retorna quantas de fato passaram; detalhe do erro fica em _last_burst_error."""
+async def _burst_send(channel, n: int, base: str | None, followup=None) -> int:
+    """MESMO envio da v3.1 (payload + gif strobe). Escada de modos quando o
+    canal nega acesso:
+      0 = canal full (embed+gif) | 1 = canal so gif | 2 = canal texto puro
+      3 = via interacao full | 4 = via interacao texto puro
+    User App nao e membro de dm/grupo: channel.send da 403 50001 -> modo 3/4
+    posta pela propria interacao (visivel se o defer foi publico).
+    Retorna quantas de fato passaram; detalhe em _last_burst_error."""
     global _last_burst_error
     ok = 0
     sem_ping = False
@@ -555,7 +558,7 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
     ch_guild = getattr(channel, "guild", None)
     ch_id = getattr(channel, "id", 0)
     emb = _spam_embed(ch_guild)
-    # canal sem guild (dm/grupo de app user-installado): anexo/embed dao 403 -> texto puro
+    # canal sem guild comeca no texto puro; se negar, cai pra interacao
     modo = _burst_modo_cache.get(ch_id, 2 if ch_guild is None else 0)
     tentativas = 0
     while tentativas < n:
@@ -564,13 +567,25 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
                 msg = f"{base}\n\n{SOCIETY_LINE}\ndiscord.gg/TGaUktD9D\n{GIF_CUSTOM_URLS[0]}"
             else:
                 msg = build_nuke_payload()
-            kwargs = {"content": msg[:2000],
+            if modo <= 2:
+                kwargs = {"content": msg[:2000],
+                          "allowed_mentions": MENTIONS_SEM_PING if sem_ping else MENTIONS}
+                if modo == 0 and emb is not None:
+                    kwargs["embed"] = emb
+                if modo <= 1:
+                    kwargs["file"] = _gif_file()
+                await channel.send(**kwargs)
+            else:
+                if followup is None:
+                    _last_burst_error = "canal negou acesso e sem interacao pra fallback"
+                    break
+                kw = {"content": msg[:2000],
                       "allowed_mentions": MENTIONS_SEM_PING if sem_ping else MENTIONS}
-            if modo == 0 and emb is not None:
-                kwargs["embed"] = emb
-            if modo <= 1:
-                kwargs["file"] = _gif_file()
-            await channel.send(**kwargs)
+                if modo == 3 and emb is not None:
+                    kw["embed"] = emb
+                if modo == 3:
+                    kw["file"] = _gif_file()
+                await followup.send(**kw)
             ok += 1
             tentativas += 1
             _burst_modo_cache[ch_id] = modo
@@ -591,9 +606,10 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
                 await asyncio.sleep(min(ra, 30))
                 espera_total += min(ra, 30)
                 continue
-            elif e.status == 403 and modo < 2:
+            elif e.status in (403, 404) and modo < 4:
                 modo += 1
-                _last_burst_error = f"HTTP 403 cod {getattr(e, 'code', '?')} — caindo pra modo {modo} ({'so gif' if modo == 1 else 'texto puro'})"
+                rotulos = {1: "so gif", 2: "texto puro", 3: "via interacao", 4: "interacao texto"}
+                _last_burst_error = f"HTTP {e.status} cod {getattr(e, 'code', '?')} — caindo pra modo {modo} ({rotulos.get(modo, '?')})"
                 print(f"[burst] {_last_burst_error}", flush=True)
                 continue  # downgrade nao consome tentativa
             else:
@@ -611,17 +627,19 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
 class SpamView(discord.ui.View):
     """Botão SPAM +10: visible só na mensagem ephemeral de quem rodou o comando."""
 
-    def __init__(self, target, base: str | None, total: int = 0, timeout: float = 300.0):
+    def __init__(self, target, base: str | None, total: int = 0, timeout: float = 300.0,
+                 followup=None):
         super().__init__(timeout=timeout)
         self.target = target
         self.base = base
         self.total = total
+        self.followup = followup
 
     @discord.ui.button(label="SPAM +10", style=discord.ButtonStyle.danger, emoji="💥")
     async def spam10(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         try:
-            n = await _burst_send(self.target, 10, self.base)
+            n = await _burst_send(self.target, 10, self.base, followup=self.followup)
             self.total += n
         except Exception:
             n = 0
@@ -641,21 +659,23 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
         return
     if await _nuke_guard(ctx):
         return
+    # dm/grupo (user app): defer PUBLICO — followup herda ephemeral do defer,
+    # e as msgs do burst vao pela interacao, entao precisam ser visiveis
     try:
-        await ctx.defer(ephemeral=True)  # interação some: nada mostra quem rodou
+        await ctx.defer(ephemeral=ctx.guild is not None)
     except Exception:
         pass
     vezes = max(1, min(vezes, 1000))
     base = texto.strip() if texto.strip() else None
     target = ctx.channel
-    n = await _burst_send(target, vezes, base)
+    n = await _burst_send(target, vezes, base, followup=ctx.followup)
     if n < vezes:
         _status_push({"tipo": "burst_fail", "canal": getattr(target, "name", "?"),
                       "pedidos": vezes, "enviados": n,
                       "erro": _last_burst_error,
                       "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
     detalhe = f"\n⚠️ {_last_burst_error}" if _last_burst_error else ""
-    view = SpamView(target=target, base=base, total=n, timeout=300)
+    view = SpamView(target=target, base=base, total=n, timeout=300, followup=ctx.followup)
     try:
         await ctx.followup.send(
             f"💥 **{n}/{vezes} msgs** em {target.mention} — spam +10 no botão 👇{detalhe}",
