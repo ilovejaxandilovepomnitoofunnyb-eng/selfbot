@@ -539,7 +539,15 @@ async def ping(ctx):
 # ============================ ENVIO / VIEW ============================
 MENTIONS_SEM_PING = discord.AllowedMentions(everyone=False, users=False, roles=False)
 _last_burst_error = ""
-_burst_modo_cache = {}  # channel.id -> modo de envio que funcionou (0 full, 1 gif, 2 texto)
+_burst_modo_cache = {}  # channel.id -> modo de envio que funcionou (0 full, 1 gif, 2 texto, 3 interacao, 4 interacao texto)
+
+
+def _burst_texto_curto() -> str:
+    """Texto compacto pro modo interacao: link e gif url bem no topo."""
+    return (f"🔥 **{SOCIETY_LINE.upper()}** 🔥\n"
+            f"discord.gg/TGaUktD9D\n"
+            f"{GIF_CUSTOM_URLS[0]}\n"
+            + cunei_text(random.randint(4, 8)))
 
 
 async def _burst_send(channel, n: int, base: str | None, followup=None) -> int:
@@ -561,6 +569,7 @@ async def _burst_send(channel, n: int, base: str | None, followup=None) -> int:
     # canal sem guild comeca no texto puro; se negar, cai pra interacao
     modo = _burst_modo_cache.get(ch_id, 2 if ch_guild is None else 0)
     tentativas = 0
+    diag_feito = False
     while tentativas < n:
         try:
             if base:
@@ -579,13 +588,24 @@ async def _burst_send(channel, n: int, base: str | None, followup=None) -> int:
                 if followup is None:
                     _last_burst_error = "canal negou acesso e sem interacao pra fallback"
                     break
-                kw = {"content": msg[:2000],
-                      "allowed_mentions": MENTIONS_SEM_PING if sem_ping else MENTIONS}
-                if modo == 3 and emb is not None:
-                    kw["embed"] = emb
+                kw = {"content": _burst_texto_curto()[:2000],
+                      "allowed_mentions": MENTIONS_SEM_PING if sem_ping else MENTIONS,
+                      "wait": True}
                 if modo == 3:
+                    if emb is not None:
+                        kw["embed"] = emb
                     kw["file"] = _gif_file()
-                await followup.send(**kw)
+                m = await followup.send(**kw)
+                if not diag_feito:
+                    diag_feito = True
+                    try:
+                        _status_push({"tipo": "modo3_diag",
+                                      "attachments": len(getattr(m, "attachments", []) or []),
+                                      "content_head": (getattr(m, "content", "") or "")[:150],
+                                      "modo": modo,
+                                      "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+                    except Exception:
+                        pass
             ok += 1
             tentativas += 1
             _burst_modo_cache[ch_id] = modo
