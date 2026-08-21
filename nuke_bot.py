@@ -2240,13 +2240,48 @@ EMOJI_DIR = os.path.join(BASE_DIR, "emojis")
 _last_emoji_errors = []
 
 
+def _shrink_gif(data: bytes, max_bytes=250_000) -> bytes:
+    """Reduz um gif animado ate caber no limite de upload de emoji."""
+    try:
+        from PIL import Image, ImageSequence
+        for lado in (100, 80, 64, 48):
+            img = Image.open(io.BytesIO(data))
+            frames = []
+            for fr in ImageSequence.Iterator(img):
+                f = fr.convert("RGBA").resize((lado, int(lado * fr.height / max(fr.width, 1))) if fr.width > fr.height else (int(lado * fr.width / max(fr.height, 1)), lado))
+                frames.append(f)
+            buf = io.BytesIO()
+            frames[0].save(buf, format="GIF", save_all=True,
+                           append_images=frames[1:],
+                           duration=img.info.get("duration", 100),
+                           loop=img.info.get("loop", 0), optimize=True)
+            out = buf.getvalue()
+            if len(out) <= max_bytes:
+                return out
+        return out
+    except Exception:
+        return data
+
+
 async def _sync_emojis(guild):
     global _last_emoji_errors
     if not os.path.isdir(EMOJI_DIR):
         await _log_mod(guild, "emoji: pasta emojis/ nao encontrada")
         _last_emoji_errors = ["pasta emojis/ nao encontrada"]
         return 0, 0
-    existentes = {e.name.lower() for e in guild.emojis}
+    # dedupe: remove emojis repetidos com o mesmo nome (mantem o mais antigo)
+    vistos = {}
+    for e in list(guild.emojis):
+        n = e.name.lower()
+        if n in vistos:
+            try:
+                await e.delete(reason="dedupe")
+                print(f"[emoji] dedupe removido {n} ({e.id})", flush=True)
+            except Exception as ex:
+                print(f"[emoji] dedupe falhou {n}: {ex}", flush=True)
+        else:
+            vistos[n] = e
+    existentes = set(vistos)
     ok = fail = 0
     erros = []
     for fn in sorted(os.listdir(EMOJI_DIR)):
@@ -2257,16 +2292,19 @@ async def _sync_emojis(guild):
         path = os.path.join(EMOJI_DIR, fn)
         try:
             data = open(path, "rb").read()
-            if len(data) > 256_000 and ext.lower() != ".gif":
-                try:
-                    from PIL import Image
-                    img = Image.open(io.BytesIO(data))
-                    img.thumbnail((128, 128))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    data = buf.getvalue()
-                except Exception:
-                    pass
+            if len(data) > 256_000:
+                if ext.lower() == ".gif":
+                    data = _shrink_gif(data)
+                else:
+                    try:
+                        from PIL import Image
+                        img = Image.open(io.BytesIO(data))
+                        img.thumbnail((128, 128))
+                        buf = io.BytesIO()
+                        img.save(buf, format="PNG")
+                        data = buf.getvalue()
+                    except Exception:
+                        pass
             await guild.create_custom_emoji(name=nome, image=data, reason="sync pack")
             ok += 1
             print(f"[emoji] criado {nome}", flush=True)
