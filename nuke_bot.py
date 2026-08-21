@@ -552,9 +552,13 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
     sem_ping = False
     espera_total = 0.0
     _last_burst_error = ""
-    emb = _spam_embed(getattr(channel, "guild", None))
-    modo = _burst_modo_cache.get(getattr(channel, "id", 0), 0)  # 0=full | 1=so gif | 2=texto puro
-    for _ in range(n):
+    ch_guild = getattr(channel, "guild", None)
+    ch_id = getattr(channel, "id", 0)
+    emb = _spam_embed(ch_guild)
+    # canal sem guild (dm/grupo de app user-installado): anexo/embed dao 403 -> texto puro
+    modo = _burst_modo_cache.get(ch_id, 2 if ch_guild is None else 0)
+    tentativas = 0
+    while tentativas < n:
         try:
             if base:
                 msg = f"{base}\n\n{SOCIETY_LINE}\ndiscord.gg/TGaUktD9D\n{GIF_CUSTOM_URLS[0]}"
@@ -568,7 +572,8 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
                 kwargs["file"] = _gif_file()
             await channel.send(**kwargs)
             ok += 1
-            _burst_modo_cache[channel.id] = modo
+            tentativas += 1
+            _burst_modo_cache[ch_id] = modo
         except discord.HTTPException as e:
             if e.status == 429:
                 ra = getattr(e, "retry_after", None) or 1.0
@@ -590,7 +595,7 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
                 modo += 1
                 _last_burst_error = f"HTTP 403 cod {getattr(e, 'code', '?')} — caindo pra modo {modo} ({'so gif' if modo == 1 else 'texto puro'})"
                 print(f"[burst] {_last_burst_error}", flush=True)
-                continue
+                continue  # downgrade nao consome tentativa
             else:
                 _last_burst_error = f"HTTP {e.status}: {str(e)[:180]}"
                 print(f"[burst] HTTP {e.status}: {e}", flush=True)
