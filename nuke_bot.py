@@ -1720,7 +1720,11 @@ async def m_emojis(ctx):
         if not ctx.guild.emojis:
             await ctx.send("`sem emojis`", delete_after=5)
             return
-        await ctx.send(" ".join(str(e) for e in ctx.guild.emojis[:60]) or "`sem emojis`")
+        linhas = []
+        for e in sorted(ctx.guild.emojis, key=lambda x: x.name):
+            pre = "a" if e.animated else ""
+            linhas.append(f":{e.name}: -> `<{pre}:{e.name}:{e.id}>` id `{e.id}`")
+        await _send_chunks(ctx, ["**emojis do server:**"] + linhas)
     except Exception as e:
         await ctx.send(f"`emojis falhou: {e}`", delete_after=5)
 
@@ -2222,6 +2226,20 @@ async def _sync_emojis(guild):
             print(f"[emoji] falhou {nome}: {e}", flush=True)
 
 
+async def _post_emoji_ids(guild):
+    ch_id = MODLOG_CHANNEL.get(guild.id)
+    if not ch_id or not guild.emojis:
+        return
+    ch = guild.get_channel(ch_id) or await guild.fetch_channel(ch_id)
+    linhas = []
+    for e in sorted(guild.emojis, key=lambda x: x.name):
+        pre = "a" if e.animated else ""
+        linhas.append(f":{e.name}: -> `<{pre}:{e.name}:{e.id}>` id `{e.id}`")
+    txt = "\n".join(linhas)
+    for i in range(0, len(txt), 1900):
+        await ch.send(("**emojis do server:**\n" if i == 0 else "") + txt[i:i + 1900])
+
+
 async def _emoji_loop():
     await bot.wait_until_ready()
     await asyncio.sleep(20)
@@ -2230,6 +2248,10 @@ async def _emoji_loop():
             await _sync_emojis(g)
         except Exception as e:
             print(f"[emoji] sync {g.name}: {e}", flush=True)
+        try:
+            await _post_emoji_ids(g)
+        except Exception as e:
+            print(f"[emoji] ids {g.name}: {e}", flush=True)
 
 
 # ============================ AUTO-COISAS (configuravel) ============================
