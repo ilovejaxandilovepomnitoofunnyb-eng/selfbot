@@ -1,6 +1,8 @@
 {
- "tipo": "boost_setup",
- "guild": "Set Society",
- "resultado": "painel criado em #booster-lounge + sem boost ativo ainda (perms aplicam quando boostar)",
- "ts": "2026-08-21T23:25:03.242986+00:00"
+ "tipo": "boot",
+ "bot": "Jax Fanboy#9893",
+ "guilds": [
+  "Set Society(1539791937291419650)"
+ ],
+ "ts": "2026-08-21T23:33:04.593026+00:00"
 }
