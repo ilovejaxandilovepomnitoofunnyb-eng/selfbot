@@ -1831,23 +1831,32 @@ def _git_push_config(caminhos=("autorole.json",)):
         return False
 
 
+def _find_repo_dir():
+    """Acha o dir clonado no runner (checkout aninhado: work/repo/repo)."""
+    work = "/home/runner/work"
+    if not os.path.isdir(work):
+        return None
+    for root, dirs, _files in os.walk(work):
+        if root[len(work):].count(os.sep) >= 4:
+            dirs[:] = []
+            continue
+        if ".git" in dirs:
+            return root
+    return None
+
+
 def _status_push(dados: dict, arquivo="status.json"):
     """Escreve diagnostico num json e commita no repo p/ leitura externa."""
     try:
         gt = os.environ.get("GIT_TOKEN")
         repo = os.environ.get("REPO")
         if not gt or not repo:
+            print("[status] sem GIT_TOKEN/REPO", flush=True)
             return False
         import subprocess
-        base = "/home/runner/work"
-        work = "/home/runner/work"
-        if os.path.isdir(work):
-            for d in os.listdir(work):
-                cand = os.path.join(work, d)
-                if os.path.isdir(os.path.join(cand, ".git")):
-                    base = cand
-                    break
-        if not os.path.isdir(os.path.join(base, ".git")):
+        base = _find_repo_dir()
+        if not base:
+            print("[status] repo dir nao encontrado", flush=True)
             return False
         path = os.path.join(base, arquivo)
         with open(path, "w", encoding="utf-8") as f:
