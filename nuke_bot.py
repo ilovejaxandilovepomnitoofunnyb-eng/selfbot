@@ -3035,22 +3035,42 @@ async def on_member_update(before, after):
             if role is not None:
                 await role.delete(reason="perdeu boost")
             await _log_mod(after.guild, f"boost: {after} perdeu boost, cargo custom removido")
+        # boostou agora -> aplica perks + cria painel na hora
+        elif ap_ and not bp:
+            res = await _setup_boost_guild(after.guild)
+            await _log_mod(after.guild, f"boost: {after} boostou! {res}")
+            es = _home_emojis(4)
+            emb = discord.Embed(
+                title=f"{es[0] if es else '\U0001F381'} obrigado pelo boost, {after.display_name}! {es[1] if len(es) > 1 else ''}",
+                description="teus perks ja estao ativos:\n"
+                            "- bypass de slowmode\n- prioridade na call\n- threads e emojis externos\n"
+                            "- painel no #booster-lounge (cor/nome/nick/call)",
+                color=0xF47FFF,
+                url=INVITE_LINK)
+            emb.set_footer(text="set society — discord.gg/TGaUktD9D")
+            ch = discord.utils.get(after.guild.text_channels, name="booster-lounge")
+            if ch is not None:
+                await ch.send(f"{after.mention}", embed=emb)
     except Exception as e:
         print(f"[boost] update erro: {e}", flush=True)
 
 
 async def _setup_boost_guild(guild):
     """Perks no cargo Booster + canal #booster-lounge com painel fixado.
-    Idempotente: nao duplica canal nem painel."""
+    Idempotente: nao duplica canal nem painel. Sem boost ainda: cria o
+    painel mesmo assim; perms aplicam quando o primeiro boost chegar."""
     brole = guild.premium_subscriber_role
-    if brole is None:
-        return "ninguem boostou ainda, sem cargo booster"
-    await brole.edit(permissions=discord.Permissions(**BOOSTER_PERMS), reason="perks de booster")
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        brole: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
     }
+    perms_msg = ""
+    if brole is not None:
+        await brole.edit(permissions=discord.Permissions(**BOOSTER_PERMS), reason="perks de booster")
+        overwrites[brole] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        perms_msg = f"perms em {brole.name}"
+    else:
+        perms_msg = "sem boost ativo ainda (perms aplicam quando boostar)"
     ch = discord.utils.get(guild.text_channels, name="booster-lounge")
     if ch is None:
         ch = await guild.create_text_channel("booster-lounge", overwrites=overwrites, reason="painel booster")
@@ -3060,7 +3080,7 @@ async def _setup_boost_guild(guild):
     try:
         for p in await ch.pins():
             if p.author.id == bot.user.id and p.embeds and p.embeds[0].title == "PAINEL BOOSTER":
-                return f"painel ja ativo em #{ch.name} (perms re-aplicadas em {brole.name})"
+                return f"painel ja ativo em #{ch.name} ({perms_msg})"
     except Exception:
         pass
     es = _home_emojis(4)
@@ -3079,7 +3099,7 @@ async def _setup_boost_guild(guild):
         await msg.pin()
     except Exception:
         pass
-    return f"perks setadas em {brole.name} + painel criado em #{ch.name}"
+    return f"painel criado em #{ch.name} + {perms_msg}"
 
 
 @bot.command(name="setupperks")
