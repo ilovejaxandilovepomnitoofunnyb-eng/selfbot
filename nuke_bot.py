@@ -300,7 +300,11 @@ async def on_ready():
     print(f"[+] WL: {_load_list(WHITELIST_FILE)} | BL: {_load_list(BLACKLIST_FILE)}", flush=True)
     try:
         synced = await bot.tree.sync()
-        print(f"[+] Slash sincronizados: {len(synced)}", flush=True)
+        print(f"[+] Slash globais sincronizados: {len(synced)}", flush=True)
+        gobj = discord.Object(id=1539791937291419650)
+        bot.tree.copy_global_to(guild=gobj)
+        sg = await bot.tree.sync(guild=gobj)
+        print(f"[+] Slash set society: {len(sg)}", flush=True)
     except Exception as e:
         print(f"[!] Sync falhou: {e}", flush=True)
     if _rpc_active:
@@ -434,9 +438,7 @@ async def _apply_rpc(act):
     return True
 
 
-@bot.hybrid_command(name="rpc", description="Rich presence custom (música/jogo). /rpc musica [nome] | jogo <nome> | off")
-@install_any
-@ctx_any
+@bot.command(name="rpc")
 async def rpc(ctx, modo: str = "musica", nome: str = ""):
     if not await _check_ok(ctx):
         return
@@ -464,9 +466,7 @@ async def rpc(ctx, modo: str = "musica", nome: str = ""):
     await ctx.send(f"✅ RPC {'ativo' if ok else 'falhou'} — `{act['name']}` (type {act['type']})", ephemeral=True)
 
 
-@bot.hybrid_command(name="rpcbtn", description="Configura botões do RPC (label + url). /rpcbtn 1 <label> <url>")
-@install_any
-@ctx_any
+@bot.command(name="rpcbtn")
 async def rpcbtn(ctx, numero: int = 1, label: str = "", url: str = ""):
     if not await _check_ok(ctx):
         return
@@ -492,7 +492,7 @@ async def _check_ok(ctx) -> bool:
 
 
 # ============================ COMANDOS ============================
-@bot.hybrid_command(name="ping", description="Latência e status")
+@bot.hybrid_command(name="ping", description="latencia")
 @install_any
 @ctx_any
 async def ping(ctx):
@@ -504,9 +504,6 @@ async def ping(ctx):
     await msg.edit(content=f"🏓 Pong! `{lat}ms` | API `{round((time.time()-t0)*1000,1)}ms`")
 
 
-@bot.hybrid_command(name="spam", description="Flood 2000 chars + GIF + @everyone. /spam [vezes] [texto]")
-@install_any
-@ctx_any
 # ============================ ENVIO / VIEW ============================
 async def _burst_send(channel, n: int, base: str | None) -> int:
     """MESMO envio da v3.1: payload original (com @everyone em TODAS + URL do GIF
@@ -562,7 +559,10 @@ class SpamView(discord.ui.View):
             pass
 
 
-async def spam(ctx, vezes: int = 20, texto: str = ""):
+@bot.hybrid_command(name="spam", description="spamma n msgs no canal")
+@install_any
+@ctx_any
+async def spam(ctx, vezes: int, texto: str = ""):
     if not await _check_ok(ctx):
         return
     if await _nuke_guard(ctx):
@@ -587,7 +587,7 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
             pass
 
 
-@bot.hybrid_command(name="blame", description="Poll culpando alguém + spam. /blame @pessoa")
+@bot.hybrid_command(name="blame", description="culpa alguem com enquete")
 @install_any
 @ctx_any
 async def blame(ctx, pessoa: discord.User):
@@ -606,7 +606,7 @@ async def blame(ctx, pessoa: discord.User):
         await ctx.send(f"✖ {e}", delete_after=5)
 
 
-@bot.hybrid_command(name="raid", description="Cria N canais com spam + GIF + poll. /raid [canais] [msgs]")
+@bot.hybrid_command(name="raid", description="cria canais com spam")
 @install_any
 @ctx_any
 async def raid(ctx, canais: int = 10, msgs: int = 5):
@@ -652,9 +652,7 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
         pass
 
 
-@bot.hybrid_command(name="whitelist", description="Adiciona alguém à whitelist. /whitelist @pessoa")
-@install_any
-@ctx_any
+@bot.command(name="whitelist", aliases=["wl"])
 async def whitelist(ctx, pessoa: discord.User):
     if not _owner_only(ctx.author.id):
         await ctx.send("✖ Sem permissão", delete_after=3)
@@ -671,9 +669,7 @@ async def whitelist(ctx, pessoa: discord.User):
     await ctx.send(f"✔ {pessoa.mention} adicionado à whitelist ({pessoa.id})", delete_after=5)
 
 
-@bot.hybrid_command(name="blacklist", description="Bloqueia alguém e tira da whitelist. /blacklist @pessoa")
-@install_any
-@ctx_any
+@bot.command(name="blacklist", aliases=["bl"])
 async def blacklist(ctx, pessoa: discord.User):
     if not _owner_only(ctx.author.id):
         await ctx.send("✖ Sem permissão", delete_after=3)
