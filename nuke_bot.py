@@ -321,10 +321,6 @@ async def on_ready():
     try:
         synced = await bot.tree.sync()
         print(f"[+] Slash globais sincronizados: {len(synced)}", flush=True)
-        gobj = discord.Object(id=1539791937291419650)
-        bot.tree.copy_global_to(guild=gobj)
-        sg = await bot.tree.sync(guild=gobj)
-        print(f"[+] Slash set society: {len(sg)}", flush=True)
     except Exception as e:
         print(f"[!] Sync falhou: {e}", flush=True)
     _status_push({
@@ -2134,15 +2130,41 @@ def _welcome_save():
         f.write(json.dumps(_welcome_cache))
 
 
+WELCOME_IMG = "https://raw.githubusercontent.com/ilovejaxandilovepomnitoofunnyb-eng/selfbot/main/welcome.jpg"
+HOME_GUILD_ID = 1539791937291419650
+
+
+def _home_emojis(n=None, animados=True):
+    """Emojis do set society (animados primeiro) em formato renderizavel."""
+    g = bot.get_guild(HOME_GUILD_ID)
+    if g is None:
+        return []
+    es = [str(e) for e in g.emojis if (e.animated or not animados)]
+    if not es:
+        es = [str(e) for e in g.emojis]
+    random.shuffle(es)
+    return es[:n] if n else es
+
+
 def _welcome_embed(member, text=None):
+    es = _home_emojis(6)
+    w1 = es[0] if len(es) > 0 else "\U0001F389"
+    w2 = es[1] if len(es) > 1 else "\u2728"
+    emb = discord.Embed(
+        title=f"{w1} bem-vindo(a) {member.display_name[:24]} {w2}",
+        color=0x9B59B6,
+        url=INVITE_LINK)
     if not text:
-        text = f"salve {member.mention}!"
+        desc = f"{member.mention} entrou no **set society**\n"
         if member.guild.rules_channel is not None:
-            text += f"\nle as regras em {member.guild.rules_channel.mention}"
+            desc += f"le as regras em {member.guild.rules_channel.mention}\n"
+        desc += f"voce e o membro numero **{member.guild.member_count}**"
     else:
-        text = text.replace("{user}", member.mention)
-    emb = discord.Embed(title="bem-vindo", description=text[:2000], color=0x2C2F33)
-    emb.set_footer(text="discord.gg/TGaUktD9D")
+        desc = str(text).replace("{user}", member.mention)
+    emb.description = desc[:2000]
+    emb.set_image(url=WELCOME_IMG)
+    emb.set_thumbnail(url=member.display_avatar.url)
+    emb.set_footer(text="set society — discord.gg/TGaUktD9D")
     return emb
 
 
@@ -2336,6 +2358,181 @@ async def m_perks(ctx):
     await ctx.send("\n".join(linhas), delete_after=None)
 
 
+# ============================ CARGO POR REACAO ============================
+RR_FILE = "rr.json"
+_rr_cache = {}
+
+
+def _rr_load():
+    global _rr_cache
+    try:
+        with open(RR_FILE, "r", encoding="utf-8") as f:
+            _rr_cache = json.loads(f.read())
+    except Exception:
+        _rr_cache = {}
+
+
+def _rr_save():
+    with open(RR_FILE, "w", encoding="utf-8") as f:
+        f.write(json.dumps(_rr_cache))
+
+
+def _emoji_key(emoji) -> str:
+    """Chave normalizada de um emoji (custom <a:name:id> ou unicode)."""
+    if isinstance(emoji, str):
+        return emoji.strip()
+    if getattr(emoji, "id", None):
+        return f"<{'a' if emoji.animated else ''}:{emoji.name}:{emoji.id}>"
+    return str(emoji)
+
+
+def _parse_emoji_txt(guild, txt: str):
+    """Aceita <:n:id>, <a:n:id>, :nome: (procura no set society) ou unicode."""
+    t = txt.strip()
+    if re.match(r"^<a?:[a-zA-Z0-9_]+:\d+>$", t):
+        return t
+    m = re.match(r"^:([a-zA-Z0-9_]+):$", t)
+    nome = m.group(1).lower() if m else None
+    if not nome:
+        nome = t.strip(":").lower() if t and ":" not in t.strip(":") and "<" not in t else None
+    if nome:
+        g = bot.get_guild(HOME_GUILD_ID)
+        if g is not None:
+            for e in g.emojis:
+                if e.name.lower() == nome:
+                    return _emoji_key(e)
+    if t and len(t) <= 8 and all(ord(c) < 0x3000 for c in t) and "<" not in t and "@" not in t and "#" not in t:
+        return t  # emoji unicode
+    return None
+
+
+@bot.command(name="rradd")
+async def m_rradd(ctx, canal: discord.TextChannel = None, emoji_txt: str = None, *, cargo_txt: str = None):
+    """rradd #canal <emoji> <cargo> - cria msg de reacao = cargo"""
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    if canal is None or not emoji_txt or not cargo_txt:
+        await ctx.send("`uso: rradd #canal <emoji> <cargo>`", delete_after=10)
+        return
+    role = None
+    ct = cargo_txt.strip()
+    m = re.match(r"^<@&(\d+)>$", ct)
+    if m:
+        role = ctx.guild.get_role(int(m.group(1)))
+    elif ct.isdigit():
+        role = ctx.guild.get_role(int(ct))
+    if role is None:
+        role = discord.utils.get(ctx.guild.roles, name=ct)
+    if role is None:
+        await ctx.send("`cargo nao encontrado`", delete_after=8)
+        return
+    if role >= ctx.guild.me.top_role:
+        await ctx.send("`meu cargo ta abaixo desse, nao consigo dar`", delete_after=10)
+        return
+    ek = _parse_emoji_txt(ctx.guild, emoji_txt)
+    if ek is None:
+        await ctx.send("`emoji invalido (usa <:nome:id>, :nome: ou unicode)`", delete_after=10)
+        return
+    es = _home_emojis(4)
+    emb = discord.Embed(
+        title=f"{ek} reacao = cargo",
+        description=f"reage com {ek} pra pegar **{role.name}**\n"
+                    f"{es[0] if es else ''} tira a reacao se quiser perder {es[1] if len(es) > 1 else ''}",
+        color=0x9B59B6,
+        url=INVITE_LINK)
+    emb.set_footer(text="set society — discord.gg/TGaUktD9D")
+    try:
+        msg = await canal.send(embed=emb)
+        await msg.add_reaction(ek)
+    except Exception as e:
+        await ctx.send(f"`falhou: {str(e)[:150]}`", delete_after=12)
+        return
+    _rr_load()
+    _rr_cache.setdefault(str(ctx.guild.id), []).append({
+        "channel_id": canal.id, "message_id": msg.id,
+        "emoji": ek, "role_id": role.id})
+    _rr_save()
+    _git_push_config(("rr.json",))
+    await ctx.send(f"`rr criado em #{canal.name}: {ek} -> {role.name}`", delete_after=12)
+
+
+@bot.command(name="rrlist")
+async def m_rrlist(ctx):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    _rr_load()
+    itens = _rr_cache.get(str(ctx.guild.id), [])
+    if not itens:
+        await ctx.send("`nenhum cargo por reacao`", delete_after=None)
+        return
+    linhas = []
+    for i, r in enumerate(itens, 1):
+        ch = ctx.guild.get_channel(r["channel_id"])
+        role = ctx.guild.get_role(r["role_id"])
+        linhas.append(f"`{i}` {r['emoji']} -> **{role.name if role else '?'}** em {ch.mention if ch else '?'} (`msg {r['message_id']}`)")
+    for i in range(0, len(linhas), 15):
+        await ctx.send("**cargo por reacao**\n" + "\n".join(linhas[i:i + 15]), delete_after=None)
+
+
+@bot.command(name="rrdel")
+async def m_rrdel(ctx, num: int = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    _rr_load()
+    itens = _rr_cache.get(str(ctx.guild.id), [])
+    if num is None or num < 1 or num > len(itens):
+        await ctx.send(f"`uso: rrdel <numero de 1 a {len(itens)}> (veja com rrlist)`", delete_after=12)
+        return
+    item = itens.pop(num - 1)
+    _rr_save()
+    _git_push_config(("rr.json",))
+    try:
+        ch = ctx.guild.get_channel(item["channel_id"])
+        if ch is not None:
+            m = await ch.fetch_message(item["message_id"])
+            await m.delete()
+    except Exception:
+        pass
+    await ctx.send(f"`rr {num} removido`", delete_after=10)
+
+
+async def _rr_handle(payload, add: bool):
+    if payload.guild_id is None:
+        return
+    _rr_load()
+    alvo = None
+    for r in _rr_cache.get(str(payload.guild_id), []):
+        if r["message_id"] == payload.message_id and r["emoji"] == _emoji_key(payload.emoji):
+            alvo = r
+            break
+    if alvo is None:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
+        return
+    role = guild.get_role(alvo["role_id"])
+    member = payload.member or guild.get_member(payload.user_id)
+    if role is None or member is None or member.bot:
+        return
+    try:
+        if add:
+            await member.add_roles(role, reason="reagiu")
+        else:
+            await member.remove_roles(role, reason="tirou a reacao")
+    except Exception as e:
+        print(f"[rr] {e}", flush=True)
+
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    await _rr_handle(payload, add=True)
+
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    await _rr_handle(payload, add=False)
+
+
 # ============================ SYNC EMOJIS ============================
 EMOJI_DIR = os.path.join(BASE_DIR, "emojis")
 _last_emoji_errors = []
@@ -2427,20 +2624,6 @@ async def m_emojifix(ctx):
     await ctx.send(f"`emoji sync: {ok} criados, {fail} falhas | total agora: {len(ctx.guild.emojis)}`", delete_after=None)
 
 
-async def _post_emoji_ids(guild):
-    ch_id = MODLOG_CHANNEL.get(guild.id)
-    if not ch_id or not guild.emojis:
-        return
-    ch = guild.get_channel(ch_id) or await guild.fetch_channel(ch_id)
-    linhas = []
-    for e in sorted(guild.emojis, key=lambda x: x.name):
-        pre = "a" if e.animated else ""
-        linhas.append(f":{e.name}: -> `<{pre}:{e.name}:{e.id}>` id `{e.id}`")
-    txt = "\n".join(linhas)
-    for i in range(0, len(txt), 1900):
-        await ch.send(("**emojis do server:**\n" if i == 0 else "") + txt[i:i + 1900])
-
-
 async def _emoji_loop():
     await bot.wait_until_ready()
     await asyncio.sleep(20)
@@ -2462,10 +2645,6 @@ async def _emoji_loop():
             "arquivos": sorted(os.listdir(EMOJI_DIR))[:40] if os.path.isdir(EMOJI_DIR) else [],
             "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         })
-        try:
-            await _post_emoji_ids(g)
-        except Exception as e:
-            print(f"[emoji] ids {g.name}: {e}", flush=True)
 
 
 # ============================ AUTO-COISAS (configuravel) ============================
@@ -2497,9 +2676,14 @@ def _auto_cfg(gid):
     })
 
 
-async def _dm_send(user, texto):
+async def _dm_send(user, texto, emb=None):
     try:
-        await user.send(texto[:2000])
+        if texto and emb is not None:
+            await user.send(texto[:2000], embed=emb)
+        elif emb is not None:
+            await user.send(embed=emb)
+        else:
+            await user.send(texto[:2000])
         return True
     except Exception:
         return False
@@ -2518,9 +2702,16 @@ async def _auto_welcome_dm(member):
     cfg = _auto_cfg(member.guild.id).get("autodm", {})
     if not cfg.get("on"):
         return
-    texto = cfg.get("text", "").replace("{user}", member.mention)
-    if texto:
-        await _dm_send(member, texto)
+    texto = str(cfg.get("text", "")).replace("{user}", member.mention)
+    es = _home_emojis(4)
+    emb = discord.Embed(
+        title=f"{es[0] if es else '\U0001F44B'} salve, {member.display_name[:24]} {es[1] if len(es) > 1 else ''}",
+        description=(texto or "bem-vindo ao set society! le as regras e manda um salve no lobby")[:2000],
+        color=0x9B59B6,
+        url=INVITE_LINK)
+    emb.set_thumbnail(url=member.display_avatar.url)
+    emb.set_footer(text="set society — discord.gg/TGaUktD9D")
+    await _dm_send(member, None, emb)
 
 
 async def _auto_reply_check(msg):
@@ -2687,7 +2878,14 @@ async def _autopost_loop():
                 txt = ap.get("text", "")
                 if ch is not None and txt:
                     try:
-                        await ch.send(txt[:2000])
+                        es = _home_emojis(2)
+                        emb = discord.Embed(
+                            title=f"{es[0] if es else '\U0001F4E2'} aviso {es[1] if len(es) > 1 else ''}",
+                            description=str(txt).replace("{user}", "@everyone")[:2000],
+                            color=random.choice([0x9B59B6, 0xE91E63, 0x00BCD4, 0x2ECC71]),
+                            url=INVITE_LINK)
+                        emb.set_footer(text="set society — discord.gg/TGaUktD9D")
+                        await ch.send(embed=emb)
                         _autopost_last[int(gid)] = now
                     except Exception as e:
                         print(f"[autopost] falhou em {guild.name}: {e}", flush=True)
