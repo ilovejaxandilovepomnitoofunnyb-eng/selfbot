@@ -1,8 +1,8 @@
 {
- "tipo": "boot",
- "bot": "Jax Fanboy#9893",
- "guilds": [
-  "Set Society(1539791937291419650)"
- ],
- "ts": "2026-08-21T03:27:15.289893+00:00"
+ "tipo": "burst_fail",
+ "canal": "Pentei dlc kayke gsts",
+ "pedidos": 1,
+ "enviados": 0,
+ "erro": "canal negou acesso e sem interacao pra fallback",
+ "ts": "2026-08-21T03:27:29.000752+00:00"
 }
