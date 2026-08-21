@@ -1456,6 +1456,21 @@ HELP_CATS = {
 }
 
 
+async def _send_chunks(ctx, linhas):
+    """envia em msgs de ate 1900 chars (limite do discord e 2000)."""
+    buf = []
+    total = 0
+    for l in linhas:
+        if total + len(l) + 1 > 1900 and buf:
+            await ctx.send("\n".join(buf), delete_after=None)
+            buf = []
+            total = 0
+        buf.append(l)
+        total += len(l) + 1
+    if buf:
+        await ctx.send("\n".join(buf), delete_after=None)
+
+
 @bot.command(name="help", aliases=["cmds", "ajuda"])
 async def jax_help(ctx, cat: str = None):
     if not await _check_ok(ctx):
@@ -1467,14 +1482,14 @@ async def jax_help(ctx, cat: str = None):
             return
         linhas = [f"**{cat}**"]
         linhas += [f"  `{c}` - {d}" for c, d in HELP_CATS[cat]]
-        await ctx.send("\n".join(linhas), delete_after=None)
+        await _send_chunks(ctx, linhas)
         return
     linhas = ["**comandos** (`s!` no set society, `.` nos outros)"]
     for nome, cmds in HELP_CATS.items():
         linhas.append(f"\n**{nome}:**")
         linhas += [f"  `{c}`" + (f" - {d}" if d else "") for c, d in cmds]
     linhas.append(f"\nentrou no queridinho: {INVITE_LINK}")
-    await ctx.send("\n".join(linhas), delete_after=None)
+    await _send_chunks(ctx, linhas)
 
 
 
