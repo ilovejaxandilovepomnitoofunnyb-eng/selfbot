@@ -311,6 +311,7 @@ async def setup_hook():
     bot.loop.create_task(_emoji_loop())
     bot.loop.create_task(_autopost_loop())
     bot.loop.create_task(_boost_auto_setup())
+    bot.loop.create_task(_canais_auto_setup())
     bot.add_view(BoostPanel())
 
 
@@ -3142,6 +3143,140 @@ async def _boost_auto_setup():
         "resultado": res,
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     })
+
+
+# ============================ SETUP DE CANAIS ============================
+CANAL_RULES_ID = 1539797816413655122
+CANAL_ANNC_ID = 1539797818380652544
+CANAL_LOBBY_ID = 1539797822121971802
+EMBEDS_FILE = "embeds.json"
+
+REGRAS = [
+    "respeita geral. briga feia = ban, sem advogado",
+    "sem flood/spam no chat e gritaria na call",
+    "nsfw la fora. aqui dentro e clean",
+    "nao vaza info pessoal — nem tua nem dos outros",
+    "divulgar outro server so com permissao da staff",
+    "exploit, raid ou bot estranho = ban direto",
+    "staff tem sempre razao. duvida? staff tem sempre razao",
+    "muted e mute: quem fala de bandido aumenta a pena",
+    "boosta o server que tu ganha perks e respeito",
+    "senso comum resolve 90% das regras acima",
+]
+
+
+def _embed_regras():
+    es = _home_emojis(14)
+    e0 = es[0] if es else "\U0001F4DC"
+    linhas = []
+    for i, txt in enumerate(REGRAS):
+        icone = es[(i + 2) % len(es)] if es else "\u2022"
+        linhas.append(f"{icone} \u2014 {txt}")
+    emb = discord.Embed(
+        title=f"{e0} CODIGO PENAL",
+        description="\n".join(linhas)[:2000],
+        color=0x9B59B6,
+        url=INVITE_LINK)
+    emb.set_image(url=WELCOME_IMG)
+    emb.set_footer(text="set society \u2014 quebra regra, paga com punicao")
+    return emb
+
+
+def _embed_anuncio():
+    es = _home_emojis(6)
+    emb = discord.Embed(
+        title=f"{es[0]} SET SOCIETY {es[1] if len(es) > 1 else ''}",
+        description="server de call, risada e caos controlado\n\n"
+                    "**perks de booster**\n"
+                    "- bypass de slowmode e prioridade na call\n"
+                    "- cor e nome de cargo personalizados\n"
+                    "- call privada (some quando vazia)\n\n"
+                    f"convite: {INVITE_LINK}",
+        color=0xF47FFF,
+        url=INVITE_LINK)
+    emb.set_image(url=WELCOME_IMG)
+    emb.set_footer(text="set society")
+    return emb
+
+
+def _embed_lobby():
+    es = _home_emojis(6)
+    emb = discord.Embed(
+        title=f"{es[0]} LOBBY {es[1] if len(es) > 1 else ''}",
+        description="chat livre. call aberta. chega mais.",
+        color=0x00BCD4,
+        url=INVITE_LINK)
+    emb.set_footer(text="set society")
+    return emb
+
+
+async def _postar_embeds_canais(guild):
+    """Posta os embeds oficiais nos canais rules/annc/lobby."""
+    feitos = []
+    alvos = [
+        (CANAL_RULES_ID, _embed_regras),
+        (CANAL_ANNC_ID, _embed_anuncio),
+        (CANAL_LOBBY_ID, _embed_lobby),
+    ]
+    for ch_id, builder in alvos:
+        try:
+            ch = guild.get_channel(ch_id)
+            if ch is None:
+                continue
+            await ch.send(embed=builder())
+            feitos.append(f"<#{ch_id}>")
+        except Exception as e:
+            print(f"[canais] falha em {ch_id}: {e}", flush=True)
+    return "postado em " + (", ".join(feitos) if feitos else "nenhum canal")
+
+
+def _embeds_load():
+    try:
+        with open(EMBEDS_FILE, "r", encoding="utf-8") as f:
+            return json.loads(f.read())
+    except Exception:
+        return {}
+
+
+def _embeds_save(d):
+    with open(EMBEDS_FILE, "w", encoding="utf-8") as f:
+        f.write(json.dumps(d))
+
+
+@bot.command(name="setupcanais")
+async def m_setupcanais(ctx):
+    if not _owner_ok(ctx.author.id) or ctx.guild is None:
+        return
+    await ctx.send("`postando embeds nos canais...`", delete_after=6)
+    res = await _postar_embeds_canais(ctx.guild)
+    d = _embeds_load()
+    d[str(ctx.guild.id)] = True
+    _embeds_save(d)
+    _git_push_config((EMBEDS_FILE,))
+    await ctx.send(f"`{res}`", delete_after=12)
+
+
+async def _canais_auto_setup():
+    """Posta os embeds dos canais uma unica vez (flag em embeds.json)."""
+    await bot.wait_until_ready()
+    await asyncio.sleep(30)
+    g = bot.get_guild(HOME_GUILD_ID)
+    if g is None or _embeds_load().get(str(g.id)):
+        return
+    try:
+        res = await _postar_embeds_canais(g)
+        d = _embeds_load()
+        d[str(g.id)] = True
+        _embeds_save(d)
+        _git_push_config((EMBEDS_FILE,))
+        print(f"[canais] {res}", flush=True)
+        _status_push({
+            "tipo": "canais_setup",
+            "resultado": res,
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        print(f"[canais] auto-setup falhou: {e}", flush=True)
 
 
 # ============================ MAIN ============================
