@@ -3151,34 +3151,25 @@ CANAL_ANNC_ID = 1539797818380652544
 CANAL_LOBBY_ID = 1539797822121971802
 EMBEDS_FILE = "embeds.json"
 
+SETA_REGRAS = "<a:animated_arrow_white:1540161058017378314>"
 REGRAS = [
-    "respeita geral. briga feia = ban, sem advogado",
+    "Sem xenofobia, racismo, gordofobia ou qualquer tipo de preconceito.",
     "sem flood/spam no chat e gritaria na call",
-    "nsfw la fora. aqui dentro e clean",
-    "nao vaza info pessoal — nem tua nem dos outros",
-    "divulgar outro server so com permissao da staff",
-    "exploit, raid ou bot estranho = ban direto",
-    "staff tem sempre razao. duvida? staff tem sempre razao",
-    "muted e mute: quem fala de bandido aumenta a pena",
-    "boosta o server que tu ganha perks e respeito",
+    "proibido nsfw",
+    "N\u00e3o vaze info pessoal \u2014 nem a sua, nem dos outros. (Doxxing, amea\u00e7as...)",
+    "Proibido tentativa de infectar/pegar informa\u00e7\u00f5es de qualquer membro sem a sua autoriza\u00e7\u00e3o.",
     "senso comum resolve 90% das regras acima",
 ]
 
 
 def _embed_regras():
-    es = _home_emojis(14)
-    e0 = es[0] if es else "\U0001F4DC"
-    linhas = []
-    for i, txt in enumerate(REGRAS):
-        icone = es[(i + 2) % len(es)] if es else "\u2022"
-        linhas.append(f"{icone} \u2014 {txt}")
     emb = discord.Embed(
-        title=f"{e0} CODIGO PENAL",
-        description="\n".join(linhas)[:2000],
+        title="CODIGO PENAL",
+        description="\n".join(f"{SETA_REGRAS} \u2014 {txt}" for txt in REGRAS)[:2000],
         color=0x9B59B6,
         url=INVITE_LINK)
     emb.set_image(url=WELCOME_IMG)
-    emb.set_footer(text="set society \u2014 quebra regra, paga com punicao")
+    emb.set_footer(text="set society - regras")
     return emb
 
 
@@ -3210,21 +3201,28 @@ def _embed_lobby():
     return emb
 
 
-async def _postar_embeds_canais(guild):
-    """Posta os embeds oficiais nos canais rules/annc/lobby."""
+async def _postar_embeds_canais(guild, apenas=None):
+    """Posta os embeds oficiais. apenas='regras' limpa o canal antes."""
     feitos = []
     alvos = [
-        (CANAL_RULES_ID, _embed_regras),
-        (CANAL_ANNC_ID, _embed_anuncio),
-        (CANAL_LOBBY_ID, _embed_lobby),
+        ("regras", CANAL_RULES_ID, _embed_regras),
+        ("annc", CANAL_ANNC_ID, _embed_anuncio),
+        ("lobby", CANAL_LOBBY_ID, _embed_lobby),
     ]
-    for ch_id, builder in alvos:
+    for nome, ch_id, builder in alvos:
+        if apenas and nome != apenas:
+            continue
         try:
             ch = guild.get_channel(ch_id)
             if ch is None:
                 continue
+            if nome == "regras":
+                try:
+                    await ch.purge(limit=50)
+                except Exception:
+                    pass
             await ch.send(embed=builder())
-            feitos.append(f"<#{ch_id}>")
+            feitos.append(f"#{ch.name}")
         except Exception as e:
             print(f"[canais] falha em {ch_id}: {e}", flush=True)
     return "postado em " + (", ".join(feitos) if feitos else "nenhum canal")
@@ -3244,11 +3242,12 @@ def _embeds_save(d):
 
 
 @bot.command(name="setupcanais")
-async def m_setupcanais(ctx):
+async def m_setupcanais(ctx, qual: str = None):
     if not _owner_ok(ctx.author.id) or ctx.guild is None:
         return
+    q = qual.lower() if qual else None
     await ctx.send("`postando embeds nos canais...`", delete_after=6)
-    res = await _postar_embeds_canais(ctx.guild)
+    res = await _postar_embeds_canais(ctx.guild, apenas=q)
     d = _embeds_load()
     d[str(ctx.guild.id)] = True
     _embeds_save(d)
