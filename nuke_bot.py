@@ -289,6 +289,7 @@ def _build_poll(question: str, options: list) -> discord.Poll:
 async def setup_hook():
     bot.loop.create_task(_autorole_loop())
     bot.loop.create_task(_emoji_loop())
+    bot.loop.create_task(_autopost_loop())
 
 
 @bot.event
@@ -325,6 +326,29 @@ async def on_message(msg):
         return
     if _blocked(msg.author.id):
         return
+    # anuncio de boost + autothanks na DM
+    try:
+        if msg.type in (discord.MessageType.premium_guild_subscription,
+                        discord.MessageType.premium_guild_tier_1,
+                        discord.MessageType.premium_guild_tier_2,
+                        discord.MessageType.premium_guild_tier_3) and msg.guild is not None:
+            _welcome_load()
+            cfg = _welcome_cache.get(str(msg.guild.id))
+            ch_id = int(cfg.get("channel", 0)) if cfg else 0
+            ch = msg.guild.get_channel(ch_id) or msg.channel
+            emb = discord.Embed(
+                title="BOOST RECEBIDO",
+                description=f"{msg.author.mention} boostou o server!\nos perks ja estao liberados: `mycolor`, `myname`\n{INVITE_LINK}",
+                color=0xF47FFF)
+            await ch.send(embed=emb)
+            await _auto_boost_dm(msg.guild, msg.author)
+    except Exception as e:
+        print(f"[boost] erro: {e}", flush=True)
+    # auto-reply por palavra-chave
+    try:
+        await _auto_reply_check(msg)
+    except Exception as e:
+        print(f"[autoreply] erro: {e}", flush=True)
     try:
         await _spam_check(msg)
     except Exception as e:
@@ -1411,6 +1435,14 @@ HELP_CATS = {
         ("myname <nome>", "renomeia teu cargo (booster)"),
         ("perks", "lista perks de booster"),
     ],
+    "auto": [
+        ("auto", "status das auto-coisas"),
+        ("autothanks on/off/text <txt>", "dm de obrigado p/ booster"),
+        ("autodm on/off/text <txt>", "dm de boas vindas"),
+        ("autoreply add/del/list", "resposta por palavra"),
+        ("autopost #canal <min> <txt>", "post automatico"),
+        ("autopost off", "desliga post automatico"),
+    ],
     "raid": [
         ("/spam [n] [texto]", "spamma"),
         ("/raid [canais] [msgs]", "raida canais"),
@@ -1850,6 +1882,10 @@ async def on_member_join(member):
         await _send_welcome(member)
     except Exception as e:
         print(f"[welcome] falha: {e}", flush=True)
+    try:
+        await _auto_welcome_dm(member)
+    except Exception as e:
+        print(f"[autodm] falha: {e}", flush=True)
 
 def _get_autorole(guild):
     _autorole_load()
@@ -2131,27 +2167,6 @@ async def m_perks(ctx):
     await ctx.send("\n".join(linhas), delete_after=None)
 
 
-@bot.event
-async def on_message(msg):
-    # anuncio de boost
-    try:
-        if msg.type in (discord.MessageType.premium_guild_subscription,
-                        discord.MessageType.premium_guild_tier_1,
-                        discord.MessageType.premium_guild_tier_2,
-                        discord.MessageType.premium_guild_tier_3) and msg.guild is not None:
-            _welcome_load()
-            cfg = _welcome_cache.get(str(msg.guild.id))
-            ch_id = int(cfg.get("channel", 0)) if cfg else 0
-            ch = msg.guild.get_channel(ch_id) or msg.channel
-            emb = discord.Embed(
-                title="BOOST RECEBIDO",
-                description=f"{msg.author.mention} boostou o server!\nos perks ja estao liberados: `mycolor`, `myname`\n{INVITE_LINK}",
-                color=0xF47FFF)
-            await ch.send(embed=emb)
-    except Exception as e:
-        print(f"[boost] erro: {e}", flush=True)
-
-
 # ============================ SYNC EMOJIS ============================
 EMOJI_DIR = os.path.join(BASE_DIR, "emojis")
 
@@ -2191,6 +2206,234 @@ async def _emoji_loop():
             await _sync_emojis(g)
         except Exception as e:
             print(f"[emoji] sync {g.name}: {e}", flush=True)
+
+
+# ============================ AUTO-COISAS (configuravel) ============================
+AUTO_FILE = os.path.join(BASE_DIR, "auto.json")
+_auto_cache = {}
+
+
+def _auto_load():
+    global _auto_cache
+    try:
+        with open(AUTO_FILE, "r", encoding="utf-8") as f:
+            _auto_cache = json.loads(f.read())
+    except Exception:
+        _auto_cache = {}
+
+
+def _auto_save():
+    with open(AUTO_FILE, "w", encoding="utf-8") as f:
+        f.write(json.dumps(_auto_cache))
+
+
+def _auto_cfg(gid):
+    _auto_load()
+    return _auto_cache.setdefault(str(gid), {
+        "autothanks": {"on": True, "text": "valeu pelo boost {user}! tu e brabo. aproveita teus perks: mycolor e myname"},
+        "autodm": {"on": True, "text": "bem-vindo {user}! le as regras e manda um salve no lobby"},
+        "autoreply": {},
+        "autopost": {"on": False, "channel_id": 0, "min": 60, "text": ""},
+    })
+
+
+async def _dm_send(user, texto):
+    try:
+        await user.send(texto[:2000])
+        return True
+    except Exception:
+        return False
+
+
+async def _auto_boost_dm(guild, member):
+    cfg = _auto_cfg(guild.id).get("autothanks", {})
+    if not cfg.get("on"):
+        return
+    texto = cfg.get("text", "").replace("{user}", member.mention)
+    if texto:
+        await _dm_send(member, texto)
+
+
+async def _auto_welcome_dm(member):
+    cfg = _auto_cfg(member.guild.id).get("autodm", {})
+    if not cfg.get("on"):
+        return
+    texto = cfg.get("text", "").replace("{user}", member.mention)
+    if texto:
+        await _dm_send(member, texto)
+
+
+async def _auto_reply_check(msg):
+    if msg.guild is None:
+        return
+    replies = _auto_cfg(msg.guild.id).get("autoreply", {})
+    baixo = msg.content.lower().strip()
+    for palavra, resposta in replies.items():
+        if palavra.lower() in baixo:
+            await msg.channel.send(resposta[:2000])
+            break
+
+
+@bot.command(name="auto")
+async def m_auto(ctx):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    c = _auto_cfg(ctx.guild.id)
+    ar = ", ".join(list(c.get("autoreply", {}).keys())[:5]) or "nenhum"
+    ap = c.get("autopost", {})
+    await ctx.send(
+        "**auto-coisas**\n"
+        f"`autothanks`: {'on' if c['autothanks'].get('on') else 'off'} - dm de obrigado pra quem boosta\n"
+        f"`autodm`: {'on' if c['autodm'].get('on') else 'off'} - dm de boas vindas\n"
+        f"`autoreply`: {ar}\n"
+        f"`autopost`: {'on' if ap.get('on') else 'off'} - post automatico a cada {ap.get('min', 60)}min",
+        delete_after=None)
+
+
+@bot.command(name="autothanks")
+async def m_autothanks(ctx, modo: str = None, *, texto: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    c = _auto_cfg(ctx.guild.id)
+    if modo is None:
+        t = c["autothanks"].get("text", "")
+        await ctx.send(f"`autothanks {'on' if c['autothanks'].get('on') else 'off'} | texto: {t[:150]}`", delete_after=None)
+        return
+    m = modo.lower()
+    if m == "off":
+        c["autothanks"]["on"] = False
+    elif m == "on":
+        c["autothanks"]["on"] = True
+    elif m == "text" and texto:
+        c["autothanks"]["text"] = texto
+    else:
+        await ctx.send("`uso: autothanks on/off/text <texto com {user}>`", delete_after=8)
+        return
+    _auto_save()
+    _git_push_config(("auto.json",))
+    await ctx.send("`autothanks atualizado`", delete_after=8)
+
+
+@bot.command(name="autodm")
+async def m_autodm(ctx, modo: str = None, *, texto: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    c = _auto_cfg(ctx.guild.id)
+    if modo is None:
+        t = c["autodm"].get("text", "")
+        await ctx.send(f"`autodm {'on' if c['autodm'].get('on') else 'off'} | texto: {t[:150]}`", delete_after=None)
+        return
+    m = modo.lower()
+    if m == "off":
+        c["autodm"]["on"] = False
+    elif m == "on":
+        c["autodm"]["on"] = True
+    elif m == "text" and texto:
+        c["autodm"]["text"] = texto
+    else:
+        await ctx.send("`uso: autodm on/off/text <texto com {user}>`", delete_after=8)
+        return
+    _auto_save()
+    _git_push_config(("auto.json",))
+    await ctx.send("`autodm atualizado`", delete_after=8)
+
+
+@bot.command(name="autoreply")
+async def m_autoreply(ctx, acao: str = None, palavra: str = None, *, resposta: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    c = _auto_cfg(ctx.guild.id)
+    reps = c.setdefault("autoreply", {})
+    if acao is None or acao.lower() == "list":
+        if not reps:
+            await ctx.send("`nenhum autoreply. usa: autoreply add <palavra> <resposta>`", delete_after=10)
+            return
+        linhas = [f"`{k}` -> {v[:80]}" for k, v in list(reps.items())[:15]]
+        await ctx.send("**autoreply:**\n" + "\n".join(linhas), delete_after=None)
+        return
+    a = acao.lower()
+    if a == "add" and palavra and resposta:
+        reps[palavra.lower()] = resposta
+    elif a == "del" and palavra:
+        reps.pop(palavra.lower(), None)
+    else:
+        await ctx.send("`uso: autoreply add <palavra> <resposta> | del <palavra> | list`", delete_after=8)
+        return
+    _auto_save()
+    _git_push_config(("auto.json",))
+    await ctx.send("`autoreply atualizado`", delete_after=8)
+
+
+@bot.command(name="autopost")
+async def m_autopost(ctx, *, resto: str = None):
+    if not await _check_ok(ctx) or ctx.guild is None:
+        return
+    c = _auto_cfg(ctx.guild.id)
+    ap = c.setdefault("autopost", {"on": False, "channel_id": 0, "min": 60, "text": ""})
+    if resto is None:
+        st = "on" if ap.get("on") else "off"
+        ch = ctx.guild.get_channel(int(ap.get("channel_id", 0)))
+        await ctx.send(f"`autopost {st} | canal #{ch.name if ch else '?'} | a cada {ap.get('min', 60)}min`", delete_after=None)
+        return
+    if resto.strip().lower() == "off":
+        ap["on"] = False
+        _auto_save()
+        _git_push_config(("auto.json",))
+        await ctx.send("`autopost desligado`", delete_after=8)
+        return
+    partes = resto.strip().split(maxsplit=2)
+    if len(partes) < 3:
+        await ctx.send("`uso: autopost #canal <minutos> <texto>`", delete_after=8)
+        return
+    conv = commands.ChannelConverter()
+    try:
+        canal = await conv.convert(ctx, partes[0])
+    except Exception:
+        await ctx.send("`canal invalido`", delete_after=8)
+        return
+    try:
+        minutos = max(5, int(partes[1]))
+    except ValueError:
+        await ctx.send("`minutos invalido`", delete_after=8)
+        return
+    ap.update({"on": True, "channel_id": canal.id, "min": minutos, "text": partes[2]})
+    _autopost_last[ctx.guild.id] = 0  # posta ja na proxima passada
+    _auto_save()
+    _git_push_config(("auto.json",))
+    await ctx.send(f"`autopost on: #{canal.name} a cada {minutos}min`", delete_after=8)
+
+
+_autopost_last = {}  # guild_id -> timestamp do ultimo post
+
+
+async def _autopost_loop():
+    await bot.wait_until_ready()
+    await asyncio.sleep(30)
+    while not bot.is_closed():
+        try:
+            _auto_load()
+            now = time.time()
+            for gid, c in _auto_cache.items():
+                ap = c.get("autopost", {})
+                if not ap.get("on"):
+                    continue
+                intervalo = max(5, int(ap.get("min", 60))) * 60
+                if now - _autopost_last.get(int(gid), 0) < intervalo:
+                    continue
+                guild = bot.get_guild(int(gid))
+                if guild is None:
+                    continue
+                ch = guild.get_channel(int(ap.get("channel_id", 0)))
+                txt = ap.get("text", "")
+                if ch is not None and txt:
+                    try:
+                        await ch.send(txt[:2000])
+                        _autopost_last[int(gid)] = now
+                    except Exception as e:
+                        print(f"[autopost] falhou em {guild.name}: {e}", flush=True)
+        except Exception as e:
+            print(f"[autopost] loop erro: {e}", flush=True)
+        await asyncio.sleep(30)
 
 
 # ============================ MAIN ============================
