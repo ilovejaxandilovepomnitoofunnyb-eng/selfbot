@@ -307,6 +307,12 @@ async def on_ready():
         print(f"[+] Slash set society: {len(sg)}", flush=True)
     except Exception as e:
         print(f"[!] Sync falhou: {e}", flush=True)
+    _status_push({
+        "tipo": "boot",
+        "bot": str(bot.user),
+        "guilds": [f"{g.name}({g.id})" for g in bot.guilds],
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
     if _rpc_active:
         try:
             await _apply_rpc(_rpc_active)
@@ -1824,6 +1830,44 @@ def _git_push_config(caminhos=("autorole.json",)):
         print(f"[gitcfg] {e}", flush=True)
         return False
 
+
+def _status_push(dados: dict, arquivo="status.json"):
+    """Escreve diagnostico num json e commita no repo p/ leitura externa."""
+    try:
+        gt = os.environ.get("GIT_TOKEN")
+        repo = os.environ.get("REPO")
+        if not gt or not repo:
+            return False
+        import subprocess
+        base = "/home/runner/work"
+        work = "/home/runner/work"
+        if os.path.isdir(work):
+            for d in os.listdir(work):
+                cand = os.path.join(work, d)
+                if os.path.isdir(os.path.join(cand, ".git")):
+                    base = cand
+                    break
+        if not os.path.isdir(os.path.join(base, ".git")):
+            return False
+        path = os.path.join(base, arquivo)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=1)
+        url = f"https://x-access-token:{gt}@github.com/{repo}.git"
+        subprocess.run(["git", "config", "user.email", "jax@bot.local"], cwd=base, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Jax Bot"], cwd=base, capture_output=True)
+        subprocess.run(["git", "add", "-A", "--", arquivo], cwd=base, capture_output=True)
+        subprocess.run(["git", "commit", "-m", f"status: {dados.get('tipo', 'info')}"], cwd=base, capture_output=True)
+        subprocess.run(["git", "remote", "set-url", "origin", url], cwd=base, capture_output=True)
+        subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=base, capture_output=True, timeout=30)
+        r = subprocess.run(["git", "push", "origin", "HEAD:main"], cwd=base, capture_output=True, timeout=30)
+        if r.returncode != 0:
+            print(f"[status] push falhou: {r.stderr.decode(errors='replace')[:300]}", flush=True)
+        return r.returncode == 0
+    except Exception as e:
+        print(f"[status] {e}", flush=True)
+        return False
+
+
 # ============================ AUTO-ROLE ============================
 AUTOROLE_FILE = "autorole.json"
 # fallback se nao tiver config: {guild_id: role_id}
@@ -2184,11 +2228,14 @@ async def m_perks(ctx):
 
 # ============================ SYNC EMOJIS ============================
 EMOJI_DIR = os.path.join(BASE_DIR, "emojis")
+_last_emoji_errors = []
 
 
 async def _sync_emojis(guild):
+    global _last_emoji_errors
     if not os.path.isdir(EMOJI_DIR):
         await _log_mod(guild, "emoji: pasta emojis/ nao encontrada")
+        _last_emoji_errors = ["pasta emojis/ nao encontrada"]
         return 0, 0
     existentes = {e.name.lower() for e in guild.emojis}
     ok = fail = 0
@@ -2216,8 +2263,9 @@ async def _sync_emojis(guild):
             print(f"[emoji] criado {nome}", flush=True)
         except Exception as e:
             fail += 1
-            erros.append(f"{nome}: {str(e)[:60]}")
+            erros.append(f"{nome}: {type(e).__name__} {str(e)[:200]}")
             print(f"[emoji] falhou {nome}: {e}", flush=True)
+    _last_emoji_errors = list(erros)
     await _log_mod(guild, f"emoji sync: {ok} criados, {fail} falhas" + (f" | {erros[:3]}" if erros else ""))
     return ok, fail
 
@@ -2248,11 +2296,24 @@ async def _post_emoji_ids(guild):
 async def _emoji_loop():
     await bot.wait_until_ready()
     await asyncio.sleep(20)
+    import traceback
     for g in bot.guilds:
+        resultado = ""
         try:
-            await _sync_emojis(g)
-        except Exception as e:
-            print(f"[emoji] sync {g.name}: {e}", flush=True)
+            ok, fail = await _sync_emojis(g)
+            resultado = f"{ok} criados, {fail} falhas, total agora {len(g.emojis)}"
+        except Exception:
+            resultado = traceback.format_exc()[-900:]
+        _status_push({
+            "tipo": "emoji_sync",
+            "guild": g.name,
+            "guild_id": g.id,
+            "resultado": resultado,
+            "erros": _last_emoji_errors[:10],
+            "pasta_existe": os.path.isdir(EMOJI_DIR),
+            "arquivos": sorted(os.listdir(EMOJI_DIR))[:40] if os.path.isdir(EMOJI_DIR) else [],
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        })
         try:
             await _post_emoji_ids(g)
         except Exception as e:
