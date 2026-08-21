@@ -2256,7 +2256,13 @@ async def m_testwelcome(ctx, alvo: discord.Member = None):
 
 # ============================ BOOSTER PERKS ============================
 def _is_booster(member):
-    return bool(getattr(member, "premium_since", None))
+    """Booster = boost real do discord OU tem o cargo 'booster' do server."""
+    if getattr(member, "premium_since", None):
+        return True
+    try:
+        return any(r.name.lower() == "booster" for r in member.roles)
+    except Exception:
+        return False
 
 
 async def _booster_gate(ctx):
@@ -3064,13 +3070,19 @@ async def _setup_boost_guild(guild):
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
     }
-    perms_msg = ""
+    # cargo 'booster' do server (criado na mao) recebe as perms SEMPRE
+    custom = discord.utils.get(guild.roles, name="booster")
+    if custom is not None:
+        await custom.edit(permissions=discord.Permissions(**BOOSTER_PERMS), reason="perks de booster")
+        overwrites[custom] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        perms_msg = f"perms no cargo {custom.name}"
+    else:
+        perms_msg = "cargo 'booster' nao existe no server"
+    # o automatico do discord (quando alguem boostar de verdade) recebe tambem
     if brole is not None:
         await brole.edit(permissions=discord.Permissions(**BOOSTER_PERMS), reason="perks de booster")
         overwrites[brole] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        perms_msg = f"perms em {brole.name}"
-    else:
-        perms_msg = "sem boost ativo ainda (perms aplicam quando boostar)"
+        perms_msg += f" + {brole.name}"
     ch = discord.utils.get(guild.text_channels, name="booster-lounge")
     if ch is None:
         ch = await guild.create_text_channel("booster-lounge", overwrites=overwrites, reason="painel booster")
