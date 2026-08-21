@@ -539,6 +539,7 @@ async def ping(ctx):
 # ============================ ENVIO / VIEW ============================
 MENTIONS_SEM_PING = discord.AllowedMentions(everyone=False, users=False, roles=False)
 _last_burst_error = ""
+_burst_modo_cache = {}  # channel.id -> modo de envio que funcionou (0 full, 1 gif, 2 texto)
 
 
 async def _burst_send(channel, n: int, base: str | None) -> int:
@@ -552,7 +553,7 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
     espera_total = 0.0
     _last_burst_error = ""
     emb = _spam_embed(getattr(channel, "guild", None))
-    modo = 0  # 0=completo (embed+gif) | 1=so gif | 2=texto puro
+    modo = _burst_modo_cache.get(getattr(channel, "id", 0), 0)  # 0=full | 1=so gif | 2=texto puro
     for _ in range(n):
         try:
             if base:
@@ -567,6 +568,7 @@ async def _burst_send(channel, n: int, base: str | None) -> int:
                 kwargs["file"] = _gif_file()
             await channel.send(**kwargs)
             ok += 1
+            _burst_modo_cache[channel.id] = modo
         except discord.HTTPException as e:
             if e.status == 429:
                 ra = getattr(e, "retry_after", None) or 1.0
