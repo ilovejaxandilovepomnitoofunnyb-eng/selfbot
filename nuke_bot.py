@@ -310,6 +310,7 @@ async def setup_hook():
     bot.loop.create_task(_autorole_loop())
     bot.loop.create_task(_emoji_loop())
     bot.loop.create_task(_autopost_loop())
+    bot.loop.create_task(_boost_auto_setup())
     bot.add_view(BoostPanel())
 
 
@@ -3038,18 +3039,13 @@ async def on_member_update(before, after):
         print(f"[boost] update erro: {e}", flush=True)
 
 
-@bot.command(name="setupperks")
-async def m_setupperks(ctx):
-    if not _owner_ok(ctx.author.id) or ctx.guild is None:
-        return
-    guild = ctx.guild
+async def _setup_boost_guild(guild):
+    """Perks no cargo Booster + canal #booster-lounge com painel fixado.
+    Idempotente: nao duplica canal nem painel."""
     brole = guild.premium_subscriber_role
     if brole is None:
-        await ctx.send("`ninguem boostou ainda, sem cargo booster pra configurar`", delete_after=8)
-        return
-    # perms direto no cargo Booster padrao (sem comando nenhum)
+        return "ninguem boostou ainda, sem cargo booster"
     await brole.edit(permissions=discord.Permissions(**BOOSTER_PERMS), reason="perks de booster")
-    # canal privado dos boosters
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         brole: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -3060,18 +3056,60 @@ async def m_setupperks(ctx):
         ch = await guild.create_text_channel("booster-lounge", overwrites=overwrites, reason="painel booster")
     else:
         await ch.edit(overwrites=overwrites)
+    # painel ja fixado? nao reenvia (botoes persistem via custom_id)
+    try:
+        for p in await ch.pins():
+            if p.author.id == bot.user.id and p.embeds and p.embeds[0].title == "PAINEL BOOSTER":
+                return f"painel ja ativo em #{ch.name} (perms re-aplicadas em {brole.name})"
+    except Exception:
+        pass
+    es = _home_emojis(4)
     emb = discord.Embed(
         title="PAINEL BOOSTER",
-        description="usa os botoes ai embaixo:\n"
+        description=f"{es[0] if es else ''} usa os botoes ai embaixo {es[1] if len(es) > 1 else ''}\n"
                     "- cor do cargo: teu cargo personalizado com a cor que quiser\n"
                     "- nome do cargo: renomeia teu cargo\n"
                     "- meu nick: troca teu nick quando quiser\n"
                     "- minha call: cria call privada so tua (some quando vazia)",
-        color=0xF47FFF)
+        color=0xF47FFF,
+        url=INVITE_LINK)
     emb.set_footer(text="perks automaticas: bypass slowmode, prioridade na call, threads")
-    await ch.purge(limit=20)
-    await ch.send(embed=emb, view=BoostPanel())
-    await ctx.send(f"`perks setadas no cargo {brole.name} + painel em #{ch.name}`", delete_after=8)
+    msg = await ch.send(embed=emb, view=BoostPanel())
+    try:
+        await msg.pin()
+    except Exception:
+        pass
+    return f"perks setadas em {brole.name} + painel criado em #{ch.name}"
+
+
+@bot.command(name="setupperks")
+async def m_setupperks(ctx):
+    if not _owner_ok(ctx.author.id) or ctx.guild is None:
+        return
+    res = await _setup_boost_guild(ctx.guild)
+    await ctx.send(f"`{res}`", delete_after=12)
+
+
+async def _boost_auto_setup():
+    """Roda o setup de boost sozinho no boot e reporta no status.json."""
+    await bot.wait_until_ready()
+    await asyncio.sleep(25)
+    g = bot.get_guild(HOME_GUILD_ID)
+    if g is None:
+        return
+    try:
+        res = await _setup_boost_guild(g)
+    except Exception as e:
+        import traceback
+        res = traceback.format_exc()[-600:]
+        print(f"[boost] auto-setup falhou: {e}", flush=True)
+    print(f"[boost] {res}", flush=True)
+    _status_push({
+        "tipo": "boost_setup",
+        "guild": g.name,
+        "resultado": res,
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    })
 
 
 # ============================ MAIN ============================
