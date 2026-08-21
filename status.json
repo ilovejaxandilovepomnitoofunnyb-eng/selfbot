@@ -1,8 +1,8 @@
 {
- "tipo": "burst_fail",
- "canal": "Pentei dlc kayke gsts",
- "pedidos": 1,
- "enviados": 0,
- "erro": "HTTP 403: 403 Forbidden (error code: 50001): Missing Access",
- "ts": "2026-08-21T03:10:31.854961+00:00"
+ "tipo": "boot",
+ "bot": "Jax Fanboy#9893",
+ "guilds": [
+  "Set Society(1539791937291419650)"
+ ],
+ "ts": "2026-08-21T03:12:46.578152+00:00"
 }
