@@ -3149,6 +3149,7 @@ async def _boost_auto_setup():
 CANAL_RULES_ID = 1539797816413655122
 CANAL_ANNC_ID = 1539797818380652544
 CANAL_LOBBY_ID = 1539797822121971802
+CANAL_ADDBOT_ID = 1539803000753758338
 EMBEDS_FILE = "embeds.json"
 
 SETA_REGRAS = "<a:animated_arrow_white:1540161058017378314>"
@@ -3201,6 +3202,31 @@ def _embed_lobby():
     return emb
 
 
+BOT_APP_URL = ("https://discord.com/oauth2/authorize"
+               "?client_id=1538338372085612695&scope=applications.commands")
+
+
+def _embed_addbot():
+    s = SETA_REGRAS
+    es = _home_emojis(4)
+    emb = discord.Embed(
+        title=f"{es[0] if es else '\U0001F916'} ADICIONA O BOT {es[1] if len(es) > 1 else ''}",
+        description="leva o **Jax Fanboy** pra qualquer dm, grupo ou server\n\n"
+                    "**como instalar (Meus Apps):**\n"
+                    f"{s} abre: {BOT_APP_URL}\n"
+                    f"{s} em *onde usar*, escolhe **Adicionar aos Meus Apps**\n"
+                    f"{s} autoriza e pronto \u2014 o bot fica contigo, sem precisar de server\n"
+                    f"{s} usa `/spam`, `/ping` e cia em qualquer conversa\n\n"
+                    "**ou pelo server:**\n"
+                    f"{s} clica no bot na lista de membros\n"
+                    f"{s} **Adicionar App** \u2192 **Adicionar aos Meus Apps**",
+        color=0x5865F2,
+        url=BOT_APP_URL)
+    emb.set_thumbnail(url=WELCOME_IMG)
+    emb.set_footer(text="set society - add bot")
+    return emb
+
+
 async def _postar_embeds_canais(guild, apenas=None):
     """Posta os embeds oficiais. apenas='regras' limpa o canal antes."""
     feitos = []
@@ -3208,6 +3234,7 @@ async def _postar_embeds_canais(guild, apenas=None):
         ("regras", CANAL_RULES_ID, _embed_regras),
         ("annc", CANAL_ANNC_ID, _embed_anuncio),
         ("lobby", CANAL_LOBBY_ID, _embed_lobby),
+        ("addbot", CANAL_ADDBOT_ID, _embed_addbot),
     ]
     for nome, ch_id, builder in alvos:
         if apenas and nome != apenas:
@@ -3229,16 +3256,35 @@ async def _postar_embeds_canais(guild, apenas=None):
 
 
 def _embeds_load():
+    """Formato novo: {guild: {"regras": true, ...}}. Legado {guild: true} vira tudo feito."""
+    raw = {}
     try:
         with open(EMBEDS_FILE, "r", encoding="utf-8") as f:
-            return json.loads(f.read())
+            raw = json.loads(f.read())
     except Exception:
-        return {}
+        raw = {}
+    out = {}
+    for gid, v in raw.items():
+        if isinstance(v, dict):
+            out[str(gid)] = {str(k): bool(x) for k, x in v.items()}
+        else:
+            out[str(gid)] = {"regras": True, "annc": True, "lobby": True}
+    return out
 
 
 def _embeds_save(d):
     with open(EMBEDS_FILE, "w", encoding="utf-8") as f:
         f.write(json.dumps(d))
+
+
+def _embeds_marcar(guild_id: int, nomes):
+    d = _embeds_load()
+    e = d.setdefault(str(guild_id), {})
+    for n in nomes:
+        e[n] = True
+    _embeds_save(d)
+    _git_push_config((EMBEDS_FILE,))
+    return e
 
 
 @bot.command(name="setupcanais")
@@ -3248,26 +3294,30 @@ async def m_setupcanais(ctx, qual: str = None):
     q = qual.lower() if qual else None
     await ctx.send("`postando embeds nos canais...`", delete_after=6)
     res = await _postar_embeds_canais(ctx.guild, apenas=q)
-    d = _embeds_load()
-    d[str(ctx.guild.id)] = True
-    _embeds_save(d)
-    _git_push_config((EMBEDS_FILE,))
+    if q:
+        _embeds_marcar(ctx.guild.id, [q])
+    else:
+        _embeds_marcar(ctx.guild.id, ["regras", "annc", "lobby", "addbot"])
     await ctx.send(f"`{res}`", delete_after=12)
 
 
 async def _canais_auto_setup():
-    """Posta os embeds dos canais uma unica vez (flag em embeds.json)."""
+    """Posta so os embeds que ainda nao foram postados (flags em embeds.json)."""
     await bot.wait_until_ready()
     await asyncio.sleep(30)
     g = bot.get_guild(HOME_GUILD_ID)
-    if g is None or _embeds_load().get(str(g.id)):
+    if g is None:
+        return
+    flags = _embeds_load().get(str(g.id), {})
+    faltando = [n for n in ("regras", "annc", "lobby", "addbot") if not flags.get(n)]
+    if not faltando:
         return
     try:
-        res = await _postar_embeds_canais(g)
-        d = _embeds_load()
-        d[str(g.id)] = True
-        _embeds_save(d)
-        _git_push_config((EMBEDS_FILE,))
+        res = await _postar_embeds_canais(g, apenas=faltando[0] if len(faltando) == 1 else None)
+        if len(faltando) > 1:
+            # repostou tudo: limpa duplicatas nao da aqui, mas marca como feito
+            pass
+        _embeds_marcar(g.id, faltando)
         print(f"[canais] {res}", flush=True)
         _status_push({
             "tipo": "canais_setup",
