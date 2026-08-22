@@ -2090,9 +2090,11 @@ async def on_member_join(member):
 def _get_autorole(guild):
     _autorole_load()
     rid = _autorole_cache.get(str(guild.id))
-    if not rid:
-        return None
-    return guild.get_role(int(rid))
+    role = guild.get_role(int(rid)) if rid else None
+    if role is None:
+        # fallback: cargo padrao chamado 'member'
+        role = discord.utils.get(guild.roles, name="member")
+    return role
 
 
 async def _fix_member_roles(guild):
