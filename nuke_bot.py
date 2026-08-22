@@ -3154,6 +3154,11 @@ CANAL_ADDBOT_ID = 1539803000753758338
 EMBEDS_FILE = "embeds.json"
 
 SETA_REGRAS = "<a:animated_arrow_white:1540161058017378314>"
+# emojis fixos das embeds oficiais (nada de aleatorio)
+E_RED_CARD = "<a:redcard:1540161093228429413>"        # codigo penal
+E_NITRO = "<a:nitro:1540161082390224936>"             # anuncio/perks
+E_MEMBERS = "<:members:1540161070243778643>"          # lobby
+E_TOOLS = "<:tools:1540161101860175962>"              # add-bot
 REGRAS = [
     "Sem xenofobia, racismo, gordofobia ou qualquer tipo de preconceito.",
     "sem flood/spam no chat e gritaria na call",
@@ -3166,7 +3171,7 @@ REGRAS = [
 
 def _embed_regras():
     emb = discord.Embed(
-        title="CODIGO PENAL",
+        title=f"{E_RED_CARD} CODIGO PENAL",
         description="\n".join(f"{SETA_REGRAS} \u2014 {txt}" for txt in REGRAS)[:2000],
         color=0x9B59B6,
         url=INVITE_LINK)
@@ -3176,9 +3181,8 @@ def _embed_regras():
 
 
 def _embed_anuncio():
-    es = _home_emojis(6)
     emb = discord.Embed(
-        title=f"{es[0]} SET SOCIETY {es[1] if len(es) > 1 else ''}",
+        title=f"{E_NITRO} SET SOCIETY",
         description="server de call, risada e caos controlado\n\n"
                     "**perks de booster**\n"
                     "- bypass de slowmode e prioridade na call\n"
@@ -3193,9 +3197,8 @@ def _embed_anuncio():
 
 
 def _embed_lobby():
-    es = _home_emojis(6)
     emb = discord.Embed(
-        title=f"{es[0]} LOBBY {es[1] if len(es) > 1 else ''}",
+        title=f"{E_MEMBERS} LOBBY",
         description="chat livre. call aberta. chega mais.",
         color=0x00BCD4,
         url=INVITE_LINK)
@@ -3203,15 +3206,16 @@ def _embed_lobby():
     return emb
 
 
+# integration_type=1 = abre direto na pagina de USER INSTALL (Meus Apps)
 BOT_APP_URL = ("https://discord.com/oauth2/authorize"
-               "?client_id=1538338372085612695&scope=applications.commands")
+               "?client_id=1538338372085612695&scope=applications.commands"
+               "&integration_type=1")
 
 
 def _embed_addbot():
     s = SETA_REGRAS
-    es = _home_emojis(4)
     emb = discord.Embed(
-        title=f"{es[0] if es else '\U0001F916'} ADICIONA O BOT {es[1] if len(es) > 1 else ''}",
+        title=f"{E_TOOLS} ADICIONA O BOT",
         description="leva o **Jax Fanboy** pra qualquer dm, grupo ou server\n\n"
                     "**como instalar (Meus Apps):**\n"
                     f"{s} abre: {BOT_APP_URL}\n"
