@@ -110,7 +110,7 @@ async def _nuke_guard(ctx) -> bool:
     """True se o nuke e proibido no servidor do comando (manda aviso)."""
     if ctx.guild is not None and ctx.guild.id in NUKED_GUILDS:
         try:
-            await ctx.send("✖ nuke commands are disabled in this server", delete_after=3)
+            await ctx.send("✖ nuke commands are disabled in this server", delete_after=3, ephemeral=True)
         except Exception:
             pass
         return True
@@ -394,7 +394,7 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.CheckFailure):
         return
     try:
-        await ctx.send(f"```{error}```", delete_after=3)
+        await ctx.send(f"```{error}```", delete_after=3, ephemeral=True)
     except Exception:
         pass
 
@@ -533,7 +533,7 @@ async def ping(ctx):
     if not await _check_ok(ctx):
         return
     t0 = time.time()
-    msg = await ctx.send("pong...")
+    msg = await ctx.send("pong...", ephemeral=True)
     lat = round(bot.latency * 1000, 1)
     await msg.edit(content=f"🏓 Pong! `{lat}ms` | API `{round((time.time()-t0)*1000,1)}ms`")
 
@@ -585,7 +585,9 @@ async def _burst_send(channel, n: int, base: str | None, followup=None) -> int:
                 kw = {"content": msg[:2000],
                       "allowed_mentions": MENTIONS_SEM_PING if sem_ping else MENTIONS,
                       "wait": True}
-                if modo == 3:
+                if modo == 3 and ch_guild is not None:
+                    # servidor mantem full; dm/grupo NUNCA anexa a embed de
+                    # emojis (esconde o link) nem gif — vai texto puro
                     if emb is not None:
                         kw["embed"] = emb
                     kw["file"] = _gif_file()
@@ -697,34 +699,28 @@ async def spam(ctx, vezes: int = 20, texto: str = ""):
             ephemeral=True, view=view)
     except Exception:
         try:
-            await ctx.send(f"✔ {n} msg{detalhe}", delete_after=15)
+            await ctx.send(f"✔ {n} msg{detalhe}", delete_after=15, ephemeral=True)
         except Exception:
             pass
 
 
-@bot.hybrid_command(name="blame", description="culpa alguem com enquete")
+@bot.hybrid_command(name="blame", description="culpa alguem pelo raid")
 @install_any
 @ctx_any
 async def blame(ctx, pessoa: discord.User):
     if not await _check_ok(ctx):
         return
-    if await _nuke_guard(ctx):
-        return
     try:
-        await ctx.send(
-            f"🔥 **{pessoa.mention}** foi quem destruiu o server 🔥",
-            poll=_build_poll(f"QUEM É O CULPADO? ({pessoa})",
-                             ["Set Society", SOCIETY_LINE, "o adm", "ninguém"]),
-            allowed_mentions=MENTIONS)
-        await ctx.send(build_nuke_payload(), allowed_mentions=MENTIONS)
+        await ctx.send(f"Raided succesfully {pessoa.mention}", allowed_mentions=MENTIONS)
     except Exception as e:
-        await ctx.send(f"✖ {e}", delete_after=5)
+        await ctx.send(f"✖ {e}", delete_after=5, ephemeral=True)
 
 
-@bot.hybrid_command(name="raid", description="cria canais com spam")
+@bot.hybrid_command(name="gping", description="ghost ping: menciona e apaga na hora")
 @install_any
 @ctx_any
-async def raid(ctx, canais: int = 10, msgs: int = 5):
+async def gping(ctx, pessoa: discord.User = None):
+    """Menciona @everyone (ou o usuario escolhido) e deleta em milissegundos."""
     if not await _check_ok(ctx):
         return
     if await _nuke_guard(ctx):
@@ -733,36 +729,29 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
         await ctx.defer(ephemeral=True)
     except Exception:
         pass
-    if ctx.guild is None:
-        await ctx.followup.send("✖ /raid só em servidor. Em grupo/DM usa /spam", ephemeral=True)
-        return
-    if not ctx.guild.me.guild_permissions.manage_channels:
-        await ctx.followup.send("✖ Sem permissão de gerenciar canais", ephemeral=True)
-        return
-    canais = max(1, min(canais, 128))
-    msgs = max(1, min(msgs, 10))
-    created = []
-    for i in range(canais):
-        try:
-            ch = await ctx.guild.create_text_channel(
-                random.choice(["𒐫𒐫𒐫", "𒐫-nuked", "set-society",
-                               "𒐫-jax", "𒐫-gg"]) + f"-{i}")
-            created.append(ch)
-        except Exception:
-            pass
-        await asyncio.sleep(0.03)
-    for ch in created:
-        await _burst_send(ch, msgs, None)
-        try:
-            await ch.send("QUEM VAI CAIR?", poll=_build_poll(
-                "Set Society raid — quem é o próximo?",
-                ["o adm", "todos", "ninguém", SOCIETY_LINE]))
-        except Exception:
-            pass
+    alvo = pessoa.mention if pessoa else "@everyone"
+    fu = getattr(getattr(ctx, "interaction", None), "followup", None)
     try:
-        await ctx.followup.send(
-            f"💥 **Raid**: {len(created)} canais × {msgs} msg + polls",
-            ephemeral=True)
+        m = await ctx.channel.send(alvo, allowed_mentions=MENTIONS)
+        await asyncio.sleep(0.04)
+        await m.delete()
+        return
+    except discord.HTTPException:
+        pass  # dm/grupo: cai pro caminho da interacao
+    except Exception:
+        return
+    if fu is None:
+        return
+    try:
+        msg = await fu.send(alvo, wait=True, allowed_mentions=MENTIONS)
+        await asyncio.sleep(0.04)
+        try:
+            await fu.delete_message(msg.id)
+        except Exception:
+            try:
+                await ctx.interaction.delete_original_response()
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -770,7 +759,7 @@ async def raid(ctx, canais: int = 10, msgs: int = 5):
 @bot.command(name="blacklist", aliases=["bl"])
 async def blacklist(ctx, pessoa: discord.User):
     if not _owner_only(ctx.author.id):
-        await ctx.send("✖ Sem permissão", delete_after=3)
+        await ctx.send("✖ Sem permissão", delete_after=3, ephemeral=True)
         return
     # remove da whitelist
     wl = _load_list(WHITELIST_FILE)
@@ -782,11 +771,11 @@ async def blacklist(ctx, pessoa: discord.User):
     if pessoa.id in bl:
         bl.remove(pessoa.id)
         _save_list(BLACKLIST_FILE, bl)
-        await ctx.send(f"✔ {pessoa.mention} desbloqueado (removido da blacklist)", delete_after=5)
+        await ctx.send(f"✔ {pessoa.mention} desbloqueado (removido da blacklist)", delete_after=5, ephemeral=True)
         return
     bl.append(pessoa.id)
     _save_list(BLACKLIST_FILE, bl)
-    await ctx.send(f"✔ {pessoa.mention} bloqueado + removido da whitelist", delete_after=5)
+    await ctx.send(f"✔ {pessoa.mention} bloqueado + removido da whitelist", delete_after=5, ephemeral=True)
 
 
 
@@ -951,7 +940,7 @@ async def m_anti(ctx, modo: str = None):
     _anti_load()
     cfg = _anti_cache.setdefault(str(ctx.guild.id), {"nuke": True, "spam": True})
     if modo is None:
-        await ctx.send(f"`anti-nuke: {'on' if cfg.get('nuke') else 'off'} | anti-spam: {'on' if cfg.get('spam') else 'off'}`", delete_after=10)
+        await ctx.send(f"`anti-nuke: {'on' if cfg.get('nuke') else 'off'} | anti-spam: {'on' if cfg.get('spam') else 'off'}`", delete_after=10, ephemeral=True)
         return
     m = modo.lower()
     if m in ("on", "off", "1", "0", "true", "false", "all"):
@@ -963,12 +952,12 @@ async def m_anti(ctx, modo: str = None):
     elif m == "spam":
         cfg["spam"] = not cfg.get("spam")
     else:
-        await ctx.send("`uso: s!anti [on|off|nuke|spam]`", delete_after=5)
+        await ctx.send("`uso: s!anti [on|off|nuke|spam]`", delete_after=5, ephemeral=True)
         return
     _anti_save()
     _git_push_config(("anti.json",))
     await _log_mod(ctx.guild, f"anti: {ctx.author} mudou config p/ nuke={'on' if cfg.get('nuke') else 'off'} spam={'on' if cfg.get('spam') else 'off'}")
-    await ctx.send(f"`anti-nuke: {'on' if cfg.get('nuke') else 'off'} | anti-spam: {'on' if cfg.get('spam') else 'off'}`", delete_after=10)
+    await ctx.send(f"`anti-nuke: {'on' if cfg.get('nuke') else 'off'} | anti-spam: {'on' if cfg.get('spam') else 'off'}`", delete_after=10, ephemeral=True)
 
 
 # ============================ MODERACAO ============================
@@ -1010,9 +999,9 @@ async def m_kick(ctx, alvo: discord.Member, *, motivo: str = None):
     try:
         await alvo.kick(reason=motivo)
         await _log_mod(ctx.guild, f"kick: {alvo} ({alvo.id}) por {ctx.author} [{motivo or 'sem motivo'}]")
-        await ctx.send(f"`kick {alvo} - {motivo or 'sem motivo'}`", delete_after=5)
+        await ctx.send(f"`kick {alvo} - {motivo or 'sem motivo'}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`kick falhou: {e}`", delete_after=5)
+        await ctx.send(f"`kick falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="ban")
@@ -1022,9 +1011,9 @@ async def m_ban(ctx, alvo: discord.Member, *, motivo: str = None):
     try:
         await alvo.ban(reason=motivo, delete_message_days=0)
         await _log_mod(ctx.guild, f"ban: {alvo} ({alvo.id}) por {ctx.author} [{motivo or 'sem motivo'}]")
-        await ctx.send(f"`ban {alvo} - {motivo or 'sem motivo'}`", delete_after=5)
+        await ctx.send(f"`ban {alvo} - {motivo or 'sem motivo'}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`ban falhou: {e}`", delete_after=5)
+        await ctx.send(f"`ban falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="unban")
@@ -1035,9 +1024,9 @@ async def m_unban(ctx, user_id: int, *, motivo: str = None):
         entry = await ctx.guild.fetch_ban(discord.Object(id=user_id))
         await ctx.guild.unban(entry.user, reason=motivo)
         await _log_mod(ctx.guild, f"unban: {user_id} por {ctx.author} [{motivo or 'sem motivo'}]")
-        await ctx.send(f"`unban {user_id}`", delete_after=5)
+        await ctx.send(f"`unban {user_id}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`unban falhou: {e}`", delete_after=5)
+        await ctx.send(f"`unban falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="softban")
@@ -1048,9 +1037,9 @@ async def m_softban(ctx, alvo: discord.Member, *, motivo: str = None):
         await alvo.ban(reason="softban " + (motivo or ""), delete_message_days=1)
         await ctx.guild.unban(alvo, reason="softban completo")
         await _log_mod(ctx.guild, f"softban: {alvo} ({alvo.id}) por {ctx.author}")
-        await ctx.send(f"`softban {alvo}`", delete_after=5)
+        await ctx.send(f"`softban {alvo}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`softban falhou: {e}`", delete_after=5)
+        await ctx.send(f"`softban falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="mute")
@@ -1072,9 +1061,9 @@ async def m_mute(ctx, alvo: discord.Member, *, resto: str = None):
     try:
         await alvo.timeout(datetime.timedelta(minutes=minutos), reason="mute " + (motivo or ""))
         await _log_mod(ctx.guild, f"mute: {alvo} ({alvo.id}) {minutos}min por {ctx.author} [{motivo or 'sem motivo'}]")
-        await ctx.send(f"`mute {alvo} {minutos}min - {motivo or 'sem motivo'}`", delete_after=5)
+        await ctx.send(f"`mute {alvo} {minutos}min - {motivo or 'sem motivo'}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`mute falhou: {e}`", delete_after=5)
+        await ctx.send(f"`mute falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="unmute")
@@ -1084,9 +1073,9 @@ async def m_unmute(ctx, alvo: discord.Member):
     try:
         await alvo.timeout(None, reason="unmute")
         await _log_mod(ctx.guild, f"unmute: {alvo} ({alvo.id}) por {ctx.author}")
-        await ctx.send(f"`unmute {alvo}`", delete_after=5)
+        await ctx.send(f"`unmute {alvo}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`unmute falhou: {e}`", delete_after=5)
+        await ctx.send(f"`unmute falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="vmute")
@@ -1096,9 +1085,9 @@ async def m_vmute(ctx, alvo: discord.Member):
     try:
         await alvo.edit(mute=True)
         await _log_mod(ctx.guild, f"vmute: {alvo} ({alvo.id}) por {ctx.author}")
-        await ctx.send(f"`vmute {alvo}`", delete_after=5)
+        await ctx.send(f"`vmute {alvo}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`vmute falhou: {e}`", delete_after=5)
+        await ctx.send(f"`vmute falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="unvmute")
@@ -1107,9 +1096,9 @@ async def m_unvmute(ctx, alvo: discord.Member):
         return
     try:
         await alvo.edit(mute=False)
-        await ctx.send(f"`unvmute {alvo}`", delete_after=5)
+        await ctx.send(f"`unvmute {alvo}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`unvmute falhou: {e}`", delete_after=5)
+        await ctx.send(f"`unvmute falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="deafen")
@@ -1119,9 +1108,9 @@ async def m_deafen(ctx, alvo: discord.Member):
     try:
         await alvo.edit(deafen=True)
         await _log_mod(ctx.guild, f"deafen: {alvo} ({alvo.id}) por {ctx.author}")
-        await ctx.send(f"`deafen {alvo}`", delete_after=5)
+        await ctx.send(f"`deafen {alvo}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`deafen falhou: {e}`", delete_after=5)
+        await ctx.send(f"`deafen falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="undeafen")
@@ -1130,9 +1119,9 @@ async def m_undeafen(ctx, alvo: discord.Member):
         return
     try:
         await alvo.edit(deafen=False)
-        await ctx.send(f"`undeafen {alvo}`", delete_after=5)
+        await ctx.send(f"`undeafen {alvo}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`undeafen falhou: {e}`", delete_after=5)
+        await ctx.send(f"`undeafen falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="vkick")
@@ -1142,9 +1131,9 @@ async def m_vkick(ctx, alvo: discord.Member):
     try:
         await alvo.edit(voice_channel=None)
         await _log_mod(ctx.guild, f"vkick: {alvo} ({alvo.id}) por {ctx.author}")
-        await ctx.send(f"`vkick {alvo}`", delete_after=5)
+        await ctx.send(f"`vkick {alvo}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`vkick falhou: {e}`", delete_after=5)
+        await ctx.send(f"`vkick falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="move")
@@ -1154,9 +1143,9 @@ async def m_move(ctx, alvo: discord.Member, canal: discord.VoiceChannel):
     try:
         await alvo.edit(voice_channel=canal)
         await _log_mod(ctx.guild, f"move: {alvo} ({alvo.id}) -> {canal.name} por {ctx.author}")
-        await ctx.send(f"`move {alvo} -> {canal.name}`", delete_after=5)
+        await ctx.send(f"`move {alvo} -> {canal.name}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`move falhou: {e}`", delete_after=5)
+        await ctx.send(f"`move falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="clear")
@@ -1166,10 +1155,10 @@ async def m_clear(ctx, n: int = 20):
     n = max(1, min(n, 500))
     try:
         deleted = await ctx.channel.purge(limit=n)
-        await ctx.send(f"`clear {len(deleted)} msg`", delete_after=5)
+        await ctx.send(f"`clear {len(deleted)} msg`", delete_after=5, ephemeral=True)
         await _log_mod(ctx.guild, f"clear: {len(deleted)} msg em #{ctx.channel.name} por {ctx.author}")
     except Exception as e:
-        await ctx.send(f"`clear falhou: {e}`", delete_after=5)
+        await ctx.send(f"`clear falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="purgeuser")
@@ -1179,10 +1168,10 @@ async def m_purgeuser(ctx, alvo: discord.Member, n: int = 20):
     n = max(1, min(n, 200))
     try:
         deleted = await ctx.channel.purge(limit=n * 3, check=lambda m: m.author.id == alvo.id)
-        await ctx.send(f"`purgeuser {alvo} - {len(deleted)} msg`", delete_after=5)
+        await ctx.send(f"`purgeuser {alvo} - {len(deleted)} msg`", delete_after=5, ephemeral=True)
         await _log_mod(ctx.guild, f"purgeuser: {len(deleted)} msg de {alvo} por {ctx.author}")
     except Exception as e:
-        await ctx.send(f"`purgeuser falhou: {e}`", delete_after=5)
+        await ctx.send(f"`purgeuser falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="warn")
@@ -1196,7 +1185,7 @@ async def m_warn(ctx, alvo: discord.Member, *, motivo: str = "sem motivo"):
     warns[uid].append(motivo)
     _save_warns(warns)
     await _log_mod(ctx.guild, f"warn {len(warns[uid])}: {alvo} ({alvo.id}) [{motivo}] por {ctx.author}")
-    await ctx.send(f"`warn {alvo} [{motivo}] - total {len(warns[uid])}`", delete_after=5)
+    await ctx.send(f"`warn {alvo} [{motivo}] - total {len(warns[uid])}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="warns")
@@ -1206,10 +1195,10 @@ async def m_warns(ctx, alvo: discord.Member = None):
     alvo = alvo or ctx.author
     warns = _load_warns().get(str(alvo.id), [])
     if not warns:
-        await ctx.send(f"`{alvo} sem warns`", delete_after=5)
+        await ctx.send(f"`{alvo} sem warns`", delete_after=5, ephemeral=True)
         return
     linhas = "\n".join(f"{i + 1}. {w}" for i, w in enumerate(warns))
-    await ctx.send(f"```warns de {alvo} ({len(warns)}):\n{linhas}```", delete_after=15)
+    await ctx.send(f"```warns de {alvo} ({len(warns)}):\n{linhas}```", delete_after=15, ephemeral=True)
 
 
 @bot.command(name="delwarn")
@@ -1220,7 +1209,7 @@ async def m_delwarn(ctx, alvo: discord.Member, idx: int):
     uid = str(alvo.id)
     lst = warns.get(uid, [])
     if idx < 1 or idx > len(lst):
-        await ctx.send(f"`idx invalido (1-{len(lst)})`", delete_after=5)
+        await ctx.send(f"`idx invalido (1-{len(lst)})`", delete_after=5, ephemeral=True)
         return
     removido = lst.pop(idx - 1)
     if not lst:
@@ -1229,7 +1218,7 @@ async def m_delwarn(ctx, alvo: discord.Member, idx: int):
         warns[uid] = lst
     _save_warns(warns)
     await _log_mod(ctx.guild, f"delwarn: {alvo} ({alvo.id}) removeu [{removido}] por {ctx.author}")
-    await ctx.send(f"`delwarn {alvo} - removido [{removido}]`", delete_after=5)
+    await ctx.send(f"`delwarn {alvo} - removido [{removido}]`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="clearwarns")
@@ -1240,7 +1229,7 @@ async def m_clearwarns(ctx, alvo: discord.Member):
     warns.pop(str(alvo.id), None)
     _save_warns(warns)
     await _log_mod(ctx.guild, f"clearwarns: {alvo} ({alvo.id}) por {ctx.author}")
-    await ctx.send(f"`clearwarns {alvo} - zerado`", delete_after=5)
+    await ctx.send(f"`clearwarns {alvo} - zerado`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="slowmode")
@@ -1250,10 +1239,10 @@ async def m_slowmode(ctx, segundos: int = 5):
     try:
         segundos = max(0, min(segundos, 21600))
         await ctx.channel.edit(slowmode_delay=segundos)
-        await ctx.send(f"`slowmode {segundos}s em #{ctx.channel.name}`", delete_after=5)
+        await ctx.send(f"`slowmode {segundos}s em #{ctx.channel.name}`", delete_after=5, ephemeral=True)
         await _log_mod(ctx.guild, f"slowmode: {segundos}s em #{ctx.channel.name} por {ctx.author}")
     except Exception as e:
-        await ctx.send(f"`slowmode falhou: {e}`", delete_after=5)
+        await ctx.send(f"`slowmode falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="lock")
@@ -1262,10 +1251,10 @@ async def m_lock(ctx):
         return
     try:
         await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
-        await ctx.send(f"`#{ctx.channel.name} trancado`", delete_after=5)
+        await ctx.send(f"`#{ctx.channel.name} trancado`", delete_after=5, ephemeral=True)
         await _log_mod(ctx.guild, f"lock: #{ctx.channel.name} por {ctx.author}")
     except Exception as e:
-        await ctx.send(f"`lock falhou: {e}`", delete_after=5)
+        await ctx.send(f"`lock falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="unlock")
@@ -1274,10 +1263,10 @@ async def m_unlock(ctx):
         return
     try:
         await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=None)
-        await ctx.send(f"`#{ctx.channel.name} destrancado`", delete_after=5)
+        await ctx.send(f"`#{ctx.channel.name} destrancado`", delete_after=5, ephemeral=True)
         await _log_mod(ctx.guild, f"unlock: #{ctx.channel.name} por {ctx.author}")
     except Exception as e:
-        await ctx.send(f"`unlock falhou: {e}`", delete_after=5)
+        await ctx.send(f"`unlock falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="hide")
@@ -1286,9 +1275,9 @@ async def m_hide(ctx):
         return
     try:
         await ctx.channel.set_permissions(ctx.guild.default_role, view_channel=False)
-        await ctx.send(f"`#{ctx.channel.name} escondido`", delete_after=5)
+        await ctx.send(f"`#{ctx.channel.name} escondido`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`hide falhou: {e}`", delete_after=5)
+        await ctx.send(f"`hide falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="unhide")
@@ -1297,9 +1286,9 @@ async def m_unhide(ctx):
         return
     try:
         await ctx.channel.set_permissions(ctx.guild.default_role, view_channel=None)
-        await ctx.send(f"`#{ctx.channel.name} visivel`", delete_after=5)
+        await ctx.send(f"`#{ctx.channel.name} visivel`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`unhide falhou: {e}`", delete_after=5)
+        await ctx.send(f"`unhide falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="setnick")
@@ -1311,9 +1300,9 @@ async def m_setnick(ctx, alvo: discord.Member, *, nick: str = None):
             nick = nick[:32]
         await alvo.edit(nick=nick)
         await _log_mod(ctx.guild, f"setnick: {alvo} ({alvo.id}) -> '{nick}' por {ctx.author}")
-        await ctx.send(f"`setnick {alvo} -> {nick}`", delete_after=5)
+        await ctx.send(f"`setnick {alvo} -> {nick}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`setnick falhou: {e}`", delete_after=5)
+        await ctx.send(f"`setnick falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="role")
@@ -1323,13 +1312,13 @@ async def m_role(ctx, alvo: discord.Member, cargo: discord.Role):
     try:
         if cargo in alvo.roles:
             await alvo.remove_roles(cargo)
-            await ctx.send(f"`role - {cargo.name} de {alvo}`", delete_after=5)
+            await ctx.send(f"`role - {cargo.name} de {alvo}`", delete_after=5, ephemeral=True)
         else:
             await alvo.add_roles(cargo)
-            await ctx.send(f"`role + {cargo.name} em {alvo}`", delete_after=5)
+            await ctx.send(f"`role + {cargo.name} em {alvo}`", delete_after=5, ephemeral=True)
         await _log_mod(ctx.guild, f"role: {alvo} ({alvo.id}) {cargo.name} por {ctx.author}")
     except Exception as e:
-        await ctx.send(f"`role falhou: {e}`", delete_after=5)
+        await ctx.send(f"`role falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="announce")
@@ -1339,10 +1328,10 @@ async def m_announce(ctx, *, texto: str):
     try:
         embed = discord.Embed(description=texto, color=0x202225)
         embed.set_footer(text="set society")
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, ephemeral=True)
         await _log_mod(ctx.guild, f"announce em #{ctx.channel.name} por {ctx.author}")
     except Exception as e:
-        await ctx.send(f"`announce falhou: {e}`", delete_after=5)
+        await ctx.send(f"`announce falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 # ============================ EMBED / WEBHOOK ============================
@@ -1390,7 +1379,7 @@ async def m_embed(ctx, *, args: str):
         if ctx.guild:
             await _log_mod(ctx.guild, f"embed por {ctx.author}")
     except Exception as ex:
-        await ctx.send(f"`embed erro: {ex}`", delete_after=5)
+        await ctx.send(f"`embed erro: {ex}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="webhook", aliases=["wh"])
@@ -1408,42 +1397,42 @@ async def m_webhook(ctx, acao: str = None, alvo: str = None, *, extra: str = Non
                 canal = ctx.guild.get_channel(int(extra))
             c = canal or ch
             if c is None:
-                await ctx.send("`sem canal de texto`", delete_after=5)
+                await ctx.send("`sem canal de texto`", delete_after=5, ephemeral=True)
                 return
             wh = await c.create_webhook(name=nome)
             if ctx.guild:
                 await _log_mod(ctx.guild, f"webhook create: {nome} em #{c.name} por {ctx.author}")
-            await ctx.send(f"`webhook criado: {wh.url}`", delete_after=15)
+            await ctx.send(f"`webhook criado: {wh.url}`", delete_after=15, ephemeral=True)
         elif acao == "list":
             c = ch
             if alvo and alvo.isdigit():
                 c = ctx.guild.get_channel(int(alvo)) or c
             hooks = await (c or ch).webhooks()
             if not hooks:
-                await ctx.send("`sem webhooks`", delete_after=5)
+                await ctx.send("`sem webhooks`", delete_after=5, ephemeral=True)
                 return
             txt = "\n".join(f"{h.id} | {h.name} | {h.url}" for h in hooks)
-            await ctx.send(f"```{txt}```", delete_after=15)
+            await ctx.send(f"```{txt}```", delete_after=15, ephemeral=True)
         elif acao == "send":
             url = alvo or ""
             texto = extra or ""
             if not url or not texto:
-                await ctx.send("`uso: webhook send <url> <texto>`", delete_after=5)
+                await ctx.send("`uso: webhook send <url> <texto>`", delete_after=5, ephemeral=True)
                 return
             wh = discord.SyncWebhook.from_url(url)
             wh.send(texto)
-            await ctx.send("`enviado`", delete_after=3)
+            await ctx.send("`enviado`", delete_after=3, ephemeral=True)
         elif acao == "embed":
             url = alvo or ""
             texto = extra or ""
             if not url or not texto:
-                await ctx.send("`uso: webhook embed <url> <titulo> | <desc>`", delete_after=5)
+                await ctx.send("`uso: webhook embed <url> <titulo> | <desc>`", delete_after=5, ephemeral=True)
                 return
             titulo, _, desc = texto.partition(" | ")
             e = discord.Embed(title=titulo or None, description=desc or None, color=0x202225)
             wh = discord.SyncWebhook.from_url(url)
             wh.send(embed=e)
-            await ctx.send("`enviado`", delete_after=3)
+            await ctx.send("`enviado`", delete_after=3, ephemeral=True)
         elif acao == "delete":
             alvo = alvo or ""
             hooks = await ch.webhooks()
@@ -1452,13 +1441,13 @@ async def m_webhook(ctx, acao: str = None, alvo: str = None, *, extra: str = Non
                     await h.delete()
                     if ctx.guild:
                         await _log_mod(ctx.guild, f"webhook delete: {alvo} por {ctx.author}")
-                    await ctx.send(f"`webhook {alvo} deletado`", delete_after=5)
+                    await ctx.send(f"`webhook {alvo} deletado`", delete_after=5, ephemeral=True)
                     return
-            await ctx.send("`webhook nao achado (use webhook list)`", delete_after=5)
+            await ctx.send("`webhook nao achado (use webhook list)`", delete_after=5, ephemeral=True)
         else:
-            await ctx.send("`uso: webhook create|list|send|embed|delete`", delete_after=5)
+            await ctx.send("`uso: webhook create|list|send|embed|delete`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`webhook erro: {e}`", delete_after=5)
+        await ctx.send(f"`webhook erro: {e}`", delete_after=5, ephemeral=True)
 
 
 
@@ -1556,13 +1545,13 @@ async def _send_chunks(ctx, linhas):
     total = 0
     for l in linhas:
         if total + len(l) + 1 > 1900 and buf:
-            await ctx.send("\n".join(buf), delete_after=None)
+            await ctx.send("\n".join(buf), delete_after=None, ephemeral=True)
             buf = []
             total = 0
         buf.append(l)
         total += len(l) + 1
     if buf:
-        await ctx.send("\n".join(buf), delete_after=None)
+        await ctx.send("\n".join(buf), delete_after=None, ephemeral=True)
 
 
 @bot.command(name="help", aliases=["cmds", "ajuda"])
@@ -1572,7 +1561,7 @@ async def jax_help(ctx, cat: str = None):
     if cat:
         cat = cat.lower()
         if cat not in HELP_CATS:
-            await ctx.send("`categorias: " + " | ".join(HELP_CATS) + "`", delete_after=10)
+            await ctx.send("`categorias: " + " | ".join(HELP_CATS) + "`", delete_after=10, ephemeral=True)
             return
         linhas = [f"**{cat}**"]
         linhas += [f"  `{c}` - {d}" for c, d in HELP_CATS[cat]]
@@ -1599,9 +1588,9 @@ async def m_create(ctx, tipo: str = "texto", nome: str = "novo-canal", *, catego
             parent = discord.utils.get(ctx.guild.categories, name=categoria)
         ch = await ctx.guild.create_channel(nome, type=ctype, category=parent)
         await _log_mod(ctx.guild, f"create: #{ch.name} por {ctx.author}")
-        await ctx.send(f"`criado #{ch.name} (id {ch.id})`", delete_after=5)
+        await ctx.send(f"`criado #{ch.name} (id {ch.id})`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`create falhou: {e}`", delete_after=5)
+        await ctx.send(f"`create falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="delete")
@@ -1610,15 +1599,15 @@ async def m_delete(ctx, canal: discord.abc.GuildChannel = None):
         return
     canal = canal or ctx.channel
     if canal.id == ctx.guild.rules_channel_id or canal.id == ctx.guild.public_updates_channel_id:
-        await ctx.send("`nao apago canal de regras/updates`", delete_after=5)
+        await ctx.send("`nao apago canal de regras/updates`", delete_after=5, ephemeral=True)
         return
     try:
         nome = canal.name
         await canal.delete()
         await _log_mod(ctx.guild, f"delete: #{nome} por {ctx.author}")
-        await ctx.send(f"`#{nome} deletado`", delete_after=5)
+        await ctx.send(f"`#{nome} deletado`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`delete falhou: {e}`", delete_after=5)
+        await ctx.send(f"`delete falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="clone")
@@ -1629,9 +1618,9 @@ async def m_clone(ctx, canal: discord.abc.GuildChannel = None):
     try:
         novo = await canal.clone()
         await _log_mod(ctx.guild, f"clone: #{canal.name} -> #{novo.name} por {ctx.author}")
-        await ctx.send(f"`#{canal.name} clonado -> #{novo.name}`", delete_after=5)
+        await ctx.send(f"`#{canal.name} clonado -> #{novo.name}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`clone falhou: {e}`", delete_after=5)
+        await ctx.send(f"`clone falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="rename")
@@ -1642,9 +1631,9 @@ async def m_rename(ctx, canal: discord.abc.GuildChannel, *, nome: str):
         antigo = canal.name
         await canal.edit(name=nome)
         await _log_mod(ctx.guild, f"rename: #{antigo} -> #{nome} por {ctx.author}")
-        await ctx.send(f"`#{antigo} -> #{nome}`", delete_after=5)
+        await ctx.send(f"`#{antigo} -> #{nome}`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`rename falhou: {e}`", delete_after=5)
+        await ctx.send(f"`rename falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="topic")
@@ -1653,9 +1642,9 @@ async def m_topic(ctx, *, texto: str = None):
         return
     try:
         await ctx.channel.edit(topic=texto or "")
-        await ctx.send(f"`topic atualizado`", delete_after=5)
+        await ctx.send(f"`topic atualizado`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`topic falhou: {e}`", delete_after=5)
+        await ctx.send(f"`topic falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="thread")
@@ -1664,9 +1653,9 @@ async def m_thread(ctx, *, nome: str):
         return
     try:
         t = await ctx.channel.create_thread(name=nome, auto_archive_duration=1440)
-        await ctx.send(f"`thread {t.name} criada`", delete_after=5)
+        await ctx.send(f"`thread {t.name} criada`", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`thread falhou: {e}`", delete_after=5)
+        await ctx.send(f"`thread falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="invite")
@@ -1676,9 +1665,9 @@ async def m_invite(ctx, canal: discord.TextChannel = None):
     canal = canal or ctx.channel
     try:
         inv = await canal.create_invite(max_age=0, max_uses=0)
-        await ctx.send(f"`{inv.url}`", delete_after=None)
+        await ctx.send(f"`{inv.url}`", delete_after=None, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`invite falhou: {e}`", delete_after=5)
+        await ctx.send(f"`invite falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 # ============================ MASS ACTIONS ============================
@@ -1695,7 +1684,7 @@ async def m_moveall(ctx, canal: discord.VoiceChannel):
             except Exception:
                 pass
     await _log_mod(ctx.guild, f"moveall: {moved} -> {canal.name} por {ctx.author}")
-    await ctx.send(f"`moveall: {moved} movidos -> {canal.name}`", delete_after=5)
+    await ctx.send(f"`moveall: {moved} movidos -> {canal.name}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="roleall")
@@ -1711,7 +1700,7 @@ async def m_roleall(ctx, cargo: discord.Role):
             except Exception:
                 pass
     await _log_mod(ctx.guild, f"roleall: {ok} + {cargo.name} por {ctx.author}")
-    await ctx.send(f"`roleall: {ok} membros + {cargo.name}`", delete_after=5)
+    await ctx.send(f"`roleall: {ok} membros + {cargo.name}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="delroleall")
@@ -1727,7 +1716,7 @@ async def m_delroleall(ctx, cargo: discord.Role):
             except Exception:
                 pass
     await _log_mod(ctx.guild, f"delroleall: {ok} - {cargo.name} por {ctx.author}")
-    await ctx.send(f"`delroleall: {ok} membros - {cargo.name}`", delete_after=5)
+    await ctx.send(f"`delroleall: {ok} membros - {cargo.name}`", delete_after=5, ephemeral=True)
 
 
 # ============================ INFO ============================
@@ -1737,9 +1726,9 @@ async def m_avatar(ctx, alvo: discord.Member = None):
         return
     alvo = alvo or ctx.author
     try:
-        await ctx.send(alvo.avatar.url if alvo.avatar else "sem avatar")
+        await ctx.send(alvo.avatar.url if alvo.avatar else "sem avatar", ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`avatar falhou: {e}`", delete_after=5)
+        await ctx.send(f"`avatar falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="banner")
@@ -1749,9 +1738,9 @@ async def m_banner(ctx, alvo: discord.Member = None):
     alvo = alvo or ctx.author
     try:
         user = await ctx.bot.fetch_user(alvo.id)
-        await ctx.send(user.banner.url if user.banner else "sem banner")
+        await ctx.send(user.banner.url if user.banner else "sem banner", ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`banner falhou: {e}`", delete_after=5)
+        await ctx.send(f"`banner falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="userinfo")
@@ -1768,9 +1757,9 @@ async def m_userinfo(ctx, alvo: discord.Member = None):
             f"top role: {alvo.top_role.mention}\n"
             f"cargos: {roles}\n"
             f"bot: {'sim' if alvo.bot else 'nao'}",
-            delete_after=None)
+            delete_after=None, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`userinfo falhou: {e}`", delete_after=5)
+        await ctx.send(f"`userinfo falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="serverinfo")
@@ -1785,9 +1774,9 @@ async def m_serverinfo(ctx):
             f"membros: {g.member_count}\n"
             f"canais: {len(g.channels)} | cargos: {len(g.roles)}\n"
             f"criado: {g.created_at:%d/%m/%Y}",
-            delete_after=None)
+            delete_after=None, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`serverinfo falhou: {e}`", delete_after=5)
+        await ctx.send(f"`serverinfo falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="roleinfo")
@@ -1801,9 +1790,9 @@ async def m_roleinfo(ctx, cargo: discord.Role):
             f"posicao: {cargo.position}\n"
             f"membros: {len(cargo.members)}\n"
             f"menção: {cargo.mention}",
-            delete_after=None)
+            delete_after=None, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`roleinfo falhou: {e}`", delete_after=5)
+        await ctx.send(f"`roleinfo falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="emojis")
@@ -1812,7 +1801,7 @@ async def m_emojis(ctx):
         return
     try:
         if not ctx.guild.emojis:
-            await ctx.send("`sem emojis`", delete_after=5)
+            await ctx.send("`sem emojis`", delete_after=5, ephemeral=True)
             return
         linhas = []
         for e in sorted(ctx.guild.emojis, key=lambda x: x.name):
@@ -1820,24 +1809,69 @@ async def m_emojis(ctx):
             linhas.append(f":{e.name}: -> `<{pre}:{e.name}:{e.id}>` id `{e.id}`")
         await _send_chunks(ctx, ["**emojis do server:**"] + linhas)
     except Exception as e:
-        await ctx.send(f"`emojis falhou: {e}`", delete_after=5)
+        await ctx.send(f"`emojis falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 # ============================ DIVERSÃO ============================
-@bot.command(name="poll")
-async def m_poll(ctx, *, args: str):
-    if not await _check_ok(ctx) or ctx.guild is None:
+async def _wh_send(channel, **kw):
+    """Envia via webhook 'set society' — anonimo, nao mostra quem usou o cmd.
+    Retorna None se nao for canal de texto ou faltar perm."""
+    if not isinstance(channel, discord.TextChannel):
+        return None
+    try:
+        whs = await channel.webhooks()
+        wh = next((w for w in whs if w.name == "set society"), None)
+        if wh is None:
+            wh = await channel.create_webhook(name="set society")
+        kw.setdefault("username", "set society")
+        kw.setdefault("allowed_mentions", MENTIONS)
+        return await wh.send(wait=True, **kw)
+    except Exception:
+        return None
+
+
+@bot.hybrid_command(name="poll", description="enquete customizavel (spammavel)")
+@install_any
+@ctx_any
+async def poll(ctx, pergunta: str, opcoes: str = "sim|nao", duracao_h: int = 24,
+               multipla: bool = False, qtd: int = 1):
+    """opcoes separadas por | (max 10). duracao 1-768h. qtd>1 spamma a enquete.
+    Em servidor sai por webhook (sem atribuicao); dm/grupo vai pela interacao."""
+    if not await _check_ok(ctx):
         return
     try:
-        parts = [p.strip() for p in args.split("|")]
-        pergunta = parts[0]
-        respostas = parts[1:] or ["sim", "nao"]
-        poll = discord.Poll(question=pergunta[:300], multiple=False)
-        for r in respostas[:10]:
-            poll.add_answer(text=r[:55])
-        await ctx.send(poll=poll)
-    except Exception as e:
-        await ctx.send(f"`poll falhou: {e}`", delete_after=5)
+        await ctx.defer(ephemeral=True)
+    except Exception:
+        pass
+    resp = [o.strip()[:55] for o in opcoes.split("|") if o.strip()] or ["sim", "nao"]
+    resp = resp[:10]
+    dur = max(1, min(int(duracao_h), 768))
+    qtd = max(1, min(int(qtd), 20))
+    enviadas = 0
+    erro = ""
+    for _ in range(qtd):
+        p = discord.Poll(question=pergunta[:300],
+                         duration=datetime.timedelta(hours=dur),
+                         multiple=multipla)
+        for r in resp:
+            p.add_answer(text=r)
+        try:
+            m = await _wh_send(ctx.channel, poll=p)
+            if m is None:
+                m = await ctx.channel.send(poll=p)
+            enviadas += 1
+        except Exception as e:
+            erro = str(e)[:150]
+            break
+        await asyncio.sleep(0.7)
+    msg = f"✔ {enviadas}/{qtd} enquetes" + (f" — {erro}" if erro else "")
+    try:
+        await ctx.followup.send(msg, ephemeral=True)
+    except Exception:
+        try:
+            await ctx.send(msg, delete_after=10, ephemeral=True)
+        except Exception:
+            pass
 
 
 @bot.command(name="say")
@@ -1858,12 +1892,12 @@ async def m_calc(ctx, *, expr: str):
     try:
         expr2 = expr.replace("x", "*").replace(",", ".")
         if not re.fullmatch(r"[0-9+\-*/().% ]+", expr2):
-            await ctx.send("`expressao invalida`", delete_after=5)
+            await ctx.send("`expressao invalida`", delete_after=5, ephemeral=True)
             return
         resultado = eval(expr2, {"__builtins__": {}}, {})
-        await ctx.send(f"`{expr} = {resultado}`", delete_after=10)
+        await ctx.send(f"`{expr} = {resultado}`", delete_after=10, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`calc erro: {e}`", delete_after=5)
+        await ctx.send(f"`calc erro: {e}`", delete_after=5, ephemeral=True)
 
 
 @bot.command(name="roll")
@@ -1871,7 +1905,7 @@ async def m_roll(ctx, n: int = 100):
     if not await _check_ok(ctx):
         return
     n = max(2, min(n, 1_000_000))
-    await ctx.send(f"`🎲 {random.randint(1, n)}`", delete_after=10)
+    await ctx.send(f"`🎲 {random.randint(1, n)}`", delete_after=10, ephemeral=True)
 
 
 # ============================ NUKE (off no set society) ============================
@@ -1891,9 +1925,9 @@ async def m_nuke(ctx, canal: discord.TextChannel = None):
             await novo.edit(position=pos)
         except Exception:
             pass
-        await ctx.send(f"💥 #{nome} renascido", delete_after=5)
+        await ctx.send(f"💥 #{nome} renascido", delete_after=5, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`nuke falhou: {e}`", delete_after=5)
+        await ctx.send(f"`nuke falhou: {e}`", delete_after=5, ephemeral=True)
 
 
 
@@ -2007,13 +2041,13 @@ async def m_setautorole(ctx, cargo: discord.Role = None):
     if cargo is None:
         atual = _autorole_cache.get(str(ctx.guild.id))
         r = ctx.guild.get_role(atual) if atual else None
-        await ctx.send(f"`autorole -> {r.name if r else 'nenhum'}`", delete_after=10)
+        await ctx.send(f"`autorole -> {r.name if r else 'nenhum'}`", delete_after=10, ephemeral=True)
         return
     _autorole_cache[str(ctx.guild.id)] = cargo.id
     _autorole_save()
     _git_push_config()
     await _log_mod(ctx.guild, f"autorole: novo membro ganha {cargo.name} (set por {ctx.author})")
-    await ctx.send(f"`autorole -> {cargo.name}`", delete_after=10)
+    await ctx.send(f"`autorole -> {cargo.name}`", delete_after=10, ephemeral=True)
 
 
 @bot.command(name="delautorole")
@@ -2025,7 +2059,7 @@ async def m_delautorole(ctx):
         del _autorole_cache[str(ctx.guild.id)]
         _autorole_save()
         _git_push_config()
-    await ctx.send("`autorole removido`", delete_after=10)
+    await ctx.send("`autorole removido`", delete_after=10, ephemeral=True)
 
 
 @bot.event
@@ -2087,7 +2121,7 @@ async def m_fixroles(ctx):
     role = _get_autorole(ctx.guild)
     rname = role.name if role else "?"
     await _log_mod(ctx.guild, f"fixroles: {n} membros receberam {rname} (por {ctx.author})")
-    await ctx.send(f"`fixroles: {n} membros + {rname}`", delete_after=10)
+    await ctx.send(f"`fixroles: {n} membros + {rname}`", delete_after=10, ephemeral=True)
 
 
 async def _autorole_loop():
@@ -2201,14 +2235,14 @@ async def m_setwelcome(ctx, canal: discord.TextChannel = None):
         msg = f"`welcome -> #{c.name if c else 'nenhum'}`"
         if tx:
             msg += f"\n`texto: {tx[:100]}`"
-        await ctx.send(msg, delete_after=10)
+        await ctx.send(msg, delete_after=10, ephemeral=True)
         return
     atual = _welcome_cache.get(str(ctx.guild.id), {})
     _welcome_cache[str(ctx.guild.id)] = {"channel": canal.id, "text": atual.get("text") if isinstance(atual, dict) else None}
     _welcome_save()
     _git_push_config(("welcome.json",))
     await _log_mod(ctx.guild, f"welcome: novas entradas vao p/ #{canal.name} (set por {ctx.author})")
-    await ctx.send(f"`welcome -> #{canal.name}`", delete_after=10)
+    await ctx.send(f"`welcome -> #{canal.name}`", delete_after=10, ephemeral=True)
 
 
 @bot.command(name="welcometext")
@@ -2225,16 +2259,16 @@ async def m_welcometext(ctx, *, texto: str = None):
         _welcome_save()
         _git_push_config(("welcome.json",))
         if texto and texto.strip().lower() == "reset":
-            await ctx.send("`texto do welcome voltou ao padrao`", delete_after=10)
+            await ctx.send("`texto do welcome voltou ao padrao`", delete_after=10, ephemeral=True)
         else:
             cur = atual.get("text") or "padrao"
-            await ctx.send(f"`texto atual: {cur[:200]}`", delete_after=None)
+            await ctx.send(f"`texto atual: {cur[:200]}`", delete_after=None, ephemeral=True)
         return
     _welcome_cache[str(ctx.guild.id)] = {"channel": atual.get("channel", 0), "text": texto}
     _welcome_save()
     _git_push_config(("welcome.json",))
     await _log_mod(ctx.guild, f"welcome: texto alterado por {ctx.author}")
-    await ctx.send("`texto do welcome atualizado`", delete_after=10)
+    await ctx.send("`texto do welcome atualizado`", delete_after=10, ephemeral=True)
 
 
 @bot.command(name="delwelcome")
@@ -2246,7 +2280,7 @@ async def m_delwelcome(ctx):
         del _welcome_cache[str(ctx.guild.id)]
         _welcome_save()
         _git_push_config(("welcome.json",))
-    await ctx.send("`welcome removido`", delete_after=10)
+    await ctx.send("`welcome removido`", delete_after=10, ephemeral=True)
 
 
 @bot.command(name="testwelcome")
@@ -2255,7 +2289,7 @@ async def m_testwelcome(ctx, alvo: discord.Member = None):
         return
     alvo = alvo or ctx.author
     ok = await _send_welcome(alvo)
-    await ctx.send("`welcome enviado`" if ok else "`welcome nao configurado`", delete_after=5)
+    await ctx.send("`welcome enviado`" if ok else "`welcome nao configurado`", delete_after=5, ephemeral=True)
 
 # ============================ BOOSTER PERKS ============================
 def _is_booster(member):
@@ -2270,7 +2304,7 @@ def _is_booster(member):
 
 async def _booster_gate(ctx):
     if not _is_booster(ctx.author):
-        await ctx.send("`perk exclusiva de booster. boosta o server: " + INVITE_LINK + "`", delete_after=8)
+        await ctx.send("`perk exclusiva de booster. boosta o server: " + INVITE_LINK + "`", delete_after=8, ephemeral=True)
         return False
     return True
 
@@ -2341,13 +2375,13 @@ async def m_mycolor(ctx, *, cor: str = None):
     if not await _booster_gate(ctx):
         return
     if not cor:
-        await ctx.send("`uso: mycolor #ff0055`", delete_after=8)
+        await ctx.send("`uso: mycolor #ff0055`", delete_after=8, ephemeral=True)
         return
     hexv = cor.strip().lstrip("#")
     try:
         color = discord.Color(int(hexv, 16))
     except Exception:
-        await ctx.send("`cor invalida. ex: mycolor #ff0055`", delete_after=8)
+        await ctx.send("`cor invalida. ex: mycolor #ff0055`", delete_after=8, ephemeral=True)
         return
     role = _boost_role_of(ctx.author)
     try:
@@ -2361,9 +2395,9 @@ async def m_mycolor(ctx, *, cor: str = None):
             await ctx.author.add_roles(role)
         else:
             await role.edit(color=color, reason="perk booster")
-        await ctx.send(f"`teu cargo {role.name} agora e #{hexv}`", delete_after=8)
+        await ctx.send(f"`teu cargo {role.name} agora e #{hexv}`", delete_after=8, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`mycolor falhou: {e}`", delete_after=8)
+        await ctx.send(f"`mycolor falhou: {e}`", delete_after=8, ephemeral=True)
 
 
 @bot.command(name="myname")
@@ -2373,7 +2407,7 @@ async def m_myname(ctx, *, nome: str = None):
     if not await _booster_gate(ctx):
         return
     if not nome:
-        await ctx.send("`uso: myname rei do set`", delete_after=8)
+        await ctx.send("`uso: myname rei do set`", delete_after=8, ephemeral=True)
         return
     role = _boost_role_of(ctx.author)
     try:
@@ -2386,9 +2420,9 @@ async def m_myname(ctx, *, nome: str = None):
             await ctx.author.add_roles(role)
         else:
             await role.edit(name="\u2726 " + nome[:20], reason="perk booster")
-        await ctx.send(f"`cargo renomeado pra {role.name}`", delete_after=8)
+        await ctx.send(f"`cargo renomeado pra {role.name}`", delete_after=8, ephemeral=True)
     except Exception as e:
-        await ctx.send(f"`myname falhou: {e}`", delete_after=8)
+        await ctx.send(f"`myname falhou: {e}`", delete_after=8, ephemeral=True)
 
 
 @bot.command(name="perks")
@@ -2413,7 +2447,7 @@ async def m_perks(ctx):
         "",
         f"tu {'JA ES booster' if b else 'nao es booster. boosta ai: ' + INVITE_LINK}",
     ]
-    await ctx.send("\n".join(linhas), delete_after=None)
+    await ctx.send("\n".join(linhas), delete_after=None, ephemeral=True)
 
 
 # ============================ CARGO POR REACAO ============================
@@ -2470,7 +2504,7 @@ async def m_rradd(ctx, canal: discord.TextChannel = None, emoji_txt: str = None,
     if not await _check_ok(ctx) or ctx.guild is None:
         return
     if canal is None or not emoji_txt or not cargo_txt:
-        await ctx.send("`uso: rradd #canal <emoji> <cargo>`", delete_after=10)
+        await ctx.send("`uso: rradd #canal <emoji> <cargo>`", delete_after=10, ephemeral=True)
         return
     role = None
     ct = cargo_txt.strip()
@@ -2482,14 +2516,14 @@ async def m_rradd(ctx, canal: discord.TextChannel = None, emoji_txt: str = None,
     if role is None:
         role = discord.utils.get(ctx.guild.roles, name=ct)
     if role is None:
-        await ctx.send("`cargo nao encontrado`", delete_after=8)
+        await ctx.send("`cargo nao encontrado`", delete_after=8, ephemeral=True)
         return
     if role >= ctx.guild.me.top_role:
-        await ctx.send("`meu cargo ta abaixo desse, nao consigo dar`", delete_after=10)
+        await ctx.send("`meu cargo ta abaixo desse, nao consigo dar`", delete_after=10, ephemeral=True)
         return
     ek = _parse_emoji_txt(ctx.guild, emoji_txt)
     if ek is None:
-        await ctx.send("`emoji invalido (usa <:nome:id>, :nome: ou unicode)`", delete_after=10)
+        await ctx.send("`emoji invalido (usa <:nome:id>, :nome: ou unicode)`", delete_after=10, ephemeral=True)
         return
     es = _home_emojis(4)
     emb = discord.Embed(
@@ -2503,7 +2537,7 @@ async def m_rradd(ctx, canal: discord.TextChannel = None, emoji_txt: str = None,
         msg = await canal.send(embed=emb)
         await msg.add_reaction(ek)
     except Exception as e:
-        await ctx.send(f"`falhou: {str(e)[:150]}`", delete_after=12)
+        await ctx.send(f"`falhou: {str(e)[:150]}`", delete_after=12, ephemeral=True)
         return
     _rr_load()
     _rr_cache.setdefault(str(ctx.guild.id), []).append({
@@ -2511,7 +2545,7 @@ async def m_rradd(ctx, canal: discord.TextChannel = None, emoji_txt: str = None,
         "emoji": ek, "role_id": role.id})
     _rr_save()
     _git_push_config(("rr.json",))
-    await ctx.send(f"`rr criado em #{canal.name}: {ek} -> {role.name}`", delete_after=12)
+    await ctx.send(f"`rr criado em #{canal.name}: {ek} -> {role.name}`", delete_after=12, ephemeral=True)
 
 
 @bot.command(name="rrlist")
@@ -2521,7 +2555,7 @@ async def m_rrlist(ctx):
     _rr_load()
     itens = _rr_cache.get(str(ctx.guild.id), [])
     if not itens:
-        await ctx.send("`nenhum cargo por reacao`", delete_after=None)
+        await ctx.send("`nenhum cargo por reacao`", delete_after=None, ephemeral=True)
         return
     linhas = []
     for i, r in enumerate(itens, 1):
@@ -2529,7 +2563,7 @@ async def m_rrlist(ctx):
         role = ctx.guild.get_role(r["role_id"])
         linhas.append(f"`{i}` {r['emoji']} -> **{role.name if role else '?'}** em {ch.mention if ch else '?'} (`msg {r['message_id']}`)")
     for i in range(0, len(linhas), 15):
-        await ctx.send("**cargo por reacao**\n" + "\n".join(linhas[i:i + 15]), delete_after=None)
+        await ctx.send("**cargo por reacao**\n" + "\n".join(linhas[i:i + 15]), delete_after=None, ephemeral=True)
 
 
 @bot.command(name="rrdel")
@@ -2539,7 +2573,7 @@ async def m_rrdel(ctx, num: int = None):
     _rr_load()
     itens = _rr_cache.get(str(ctx.guild.id), [])
     if num is None or num < 1 or num > len(itens):
-        await ctx.send(f"`uso: rrdel <numero de 1 a {len(itens)}> (veja com rrlist)`", delete_after=12)
+        await ctx.send(f"`uso: rrdel <numero de 1 a {len(itens)}> (veja com rrlist)`", delete_after=12, ephemeral=True)
         return
     item = itens.pop(num - 1)
     _rr_save()
@@ -2551,7 +2585,7 @@ async def m_rrdel(ctx, num: int = None):
             await m.delete()
     except Exception:
         pass
-    await ctx.send(f"`rr {num} removido`", delete_after=10)
+    await ctx.send(f"`rr {num} removido`", delete_after=10, ephemeral=True)
 
 
 async def _rr_handle(payload, add: bool):
@@ -2677,9 +2711,9 @@ async def _sync_emojis(guild):
 async def m_emojifix(ctx):
     if not _owner_ok(ctx.author.id) or ctx.guild is None:
         return
-    await ctx.send("`re-sincronizando emojis...`", delete_after=5)
+    await ctx.send("`re-sincronizando emojis...`", delete_after=5, ephemeral=True)
     ok, fail = await _sync_emojis(ctx.guild)
-    await ctx.send(f"`emoji sync: {ok} criados, {fail} falhas | total agora: {len(ctx.guild.emojis)}`", delete_after=None)
+    await ctx.send(f"`emoji sync: {ok} criados, {fail} falhas | total agora: {len(ctx.guild.emojis)}`", delete_after=None, ephemeral=True)
 
 
 async def _emoji_loop():
@@ -2796,7 +2830,7 @@ async def m_auto(ctx):
         f"`autodm`: {'on' if c['autodm'].get('on') else 'off'} - dm de boas vindas\n"
         f"`autoreply`: {ar}\n"
         f"`autopost`: {'on' if ap.get('on') else 'off'} - post automatico a cada {ap.get('min', 60)}min",
-        delete_after=None)
+        delete_after=None, ephemeral=True)
 
 
 @bot.command(name="autothanks")
@@ -2806,7 +2840,7 @@ async def m_autothanks(ctx, modo: str = None, *, texto: str = None):
     c = _auto_cfg(ctx.guild.id)
     if modo is None:
         t = c["autothanks"].get("text", "")
-        await ctx.send(f"`autothanks {'on' if c['autothanks'].get('on') else 'off'} | texto: {t[:150]}`", delete_after=None)
+        await ctx.send(f"`autothanks {'on' if c['autothanks'].get('on') else 'off'} | texto: {t[:150]}`", delete_after=None, ephemeral=True)
         return
     m = modo.lower()
     if m == "off":
@@ -2816,11 +2850,11 @@ async def m_autothanks(ctx, modo: str = None, *, texto: str = None):
     elif m == "text" and texto:
         c["autothanks"]["text"] = texto
     else:
-        await ctx.send("`uso: autothanks on/off/text <texto com {user}>`", delete_after=8)
+        await ctx.send("`uso: autothanks on/off/text <texto com {user}>`", delete_after=8, ephemeral=True)
         return
     _auto_save()
     _git_push_config(("auto.json",))
-    await ctx.send("`autothanks atualizado`", delete_after=8)
+    await ctx.send("`autothanks atualizado`", delete_after=8, ephemeral=True)
 
 
 @bot.command(name="autodm")
@@ -2830,7 +2864,7 @@ async def m_autodm(ctx, modo: str = None, *, texto: str = None):
     c = _auto_cfg(ctx.guild.id)
     if modo is None:
         t = c["autodm"].get("text", "")
-        await ctx.send(f"`autodm {'on' if c['autodm'].get('on') else 'off'} | texto: {t[:150]}`", delete_after=None)
+        await ctx.send(f"`autodm {'on' if c['autodm'].get('on') else 'off'} | texto: {t[:150]}`", delete_after=None, ephemeral=True)
         return
     m = modo.lower()
     if m == "off":
@@ -2840,11 +2874,11 @@ async def m_autodm(ctx, modo: str = None, *, texto: str = None):
     elif m == "text" and texto:
         c["autodm"]["text"] = texto
     else:
-        await ctx.send("`uso: autodm on/off/text <texto com {user}>`", delete_after=8)
+        await ctx.send("`uso: autodm on/off/text <texto com {user}>`", delete_after=8, ephemeral=True)
         return
     _auto_save()
     _git_push_config(("auto.json",))
-    await ctx.send("`autodm atualizado`", delete_after=8)
+    await ctx.send("`autodm atualizado`", delete_after=8, ephemeral=True)
 
 
 @bot.command(name="autoreply")
@@ -2855,10 +2889,10 @@ async def m_autoreply(ctx, acao: str = None, palavra: str = None, *, resposta: s
     reps = c.setdefault("autoreply", {})
     if acao is None or acao.lower() == "list":
         if not reps:
-            await ctx.send("`nenhum autoreply. usa: autoreply add <palavra> <resposta>`", delete_after=10)
+            await ctx.send("`nenhum autoreply. usa: autoreply add <palavra> <resposta>`", delete_after=10, ephemeral=True)
             return
         linhas = [f"`{k}` -> {v[:80]}" for k, v in list(reps.items())[:15]]
-        await ctx.send("**autoreply:**\n" + "\n".join(linhas), delete_after=None)
+        await ctx.send("**autoreply:**\n" + "\n".join(linhas), delete_after=None, ephemeral=True)
         return
     a = acao.lower()
     if a == "add" and palavra and resposta:
@@ -2866,11 +2900,11 @@ async def m_autoreply(ctx, acao: str = None, palavra: str = None, *, resposta: s
     elif a == "del" and palavra:
         reps.pop(palavra.lower(), None)
     else:
-        await ctx.send("`uso: autoreply add <palavra> <resposta> | del <palavra> | list`", delete_after=8)
+        await ctx.send("`uso: autoreply add <palavra> <resposta> | del <palavra> | list`", delete_after=8, ephemeral=True)
         return
     _auto_save()
     _git_push_config(("auto.json",))
-    await ctx.send("`autoreply atualizado`", delete_after=8)
+    await ctx.send("`autoreply atualizado`", delete_after=8, ephemeral=True)
 
 
 @bot.command(name="autopost")
@@ -2882,34 +2916,34 @@ async def m_autopost(ctx, *, resto: str = None):
     if resto is None:
         st = "on" if ap.get("on") else "off"
         ch = ctx.guild.get_channel(int(ap.get("channel_id", 0)))
-        await ctx.send(f"`autopost {st} | canal #{ch.name if ch else '?'} | a cada {ap.get('min', 60)}min`", delete_after=None)
+        await ctx.send(f"`autopost {st} | canal #{ch.name if ch else '?'} | a cada {ap.get('min', 60)}min`", delete_after=None, ephemeral=True)
         return
     if resto.strip().lower() == "off":
         ap["on"] = False
         _auto_save()
         _git_push_config(("auto.json",))
-        await ctx.send("`autopost desligado`", delete_after=8)
+        await ctx.send("`autopost desligado`", delete_after=8, ephemeral=True)
         return
     partes = resto.strip().split(maxsplit=2)
     if len(partes) < 3:
-        await ctx.send("`uso: autopost #canal <minutos> <texto>`", delete_after=8)
+        await ctx.send("`uso: autopost #canal <minutos> <texto>`", delete_after=8, ephemeral=True)
         return
     conv = commands.ChannelConverter()
     try:
         canal = await conv.convert(ctx, partes[0])
     except Exception:
-        await ctx.send("`canal invalido`", delete_after=8)
+        await ctx.send("`canal invalido`", delete_after=8, ephemeral=True)
         return
     try:
         minutos = max(5, int(partes[1]))
     except ValueError:
-        await ctx.send("`minutos invalido`", delete_after=8)
+        await ctx.send("`minutos invalido`", delete_after=8, ephemeral=True)
         return
     ap.update({"on": True, "channel_id": canal.id, "min": minutos, "text": partes[2]})
     _autopost_last[ctx.guild.id] = 0  # posta ja na proxima passada
     _auto_save()
     _git_push_config(("auto.json",))
-    await ctx.send(f"`autopost on: #{canal.name} a cada {minutos}min`", delete_after=8)
+    await ctx.send(f"`autopost on: #{canal.name} a cada {minutos}min`", delete_after=8, ephemeral=True)
 
 
 _autopost_last = {}  # guild_id -> timestamp do ultimo post
@@ -3285,7 +3319,7 @@ async def m_setupperks(ctx):
     if not _owner_ok(ctx.author.id) or ctx.guild is None:
         return
     res = await _setup_boost_guild(ctx.guild)
-    await ctx.send(f"`{res}`", delete_after=12)
+    await ctx.send(f"`{res}`", delete_after=12, ephemeral=True)
 
 
 async def _boost_auto_setup():
@@ -3471,13 +3505,13 @@ async def m_setupcanais(ctx, qual: str = None):
     if not _owner_ok(ctx.author.id) or ctx.guild is None:
         return
     q = qual.lower() if qual else None
-    await ctx.send("`postando embeds nos canais...`", delete_after=6)
+    await ctx.send("`postando embeds nos canais...`", delete_after=6, ephemeral=True)
     res = await _postar_embeds_canais(ctx.guild, apenas=q)
     if q:
         _embeds_marcar(ctx.guild.id, [q])
     else:
         _embeds_marcar(ctx.guild.id, ["regras", "annc", "lobby", "addbot"])
-    await ctx.send(f"`{res}`", delete_after=12)
+    await ctx.send(f"`{res}`", delete_after=12, ephemeral=True)
 
 
 async def _canais_auto_setup():
