@@ -313,6 +313,7 @@ async def setup_hook():
     bot.loop.create_task(_boost_auto_setup())
     bot.loop.create_task(_canais_auto_setup())
     bot.loop.create_task(_cmd_loop())
+    bot.loop.create_task(_call_sweep_loop())
     bot.add_view(BoostPanel())
 
 
@@ -2301,10 +2302,8 @@ async def m_mycolor(ctx, *, cor: str = None):
         if role is None:
             nome = "\u2726 " + ctx.author.display_name[:20]
             role = await ctx.guild.create_role(name=nome, color=color, hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
-            base = ctx.guild.get_role(1539797800932610068)
-            pos = base.position + 1 if base else role.position
             try:
-                await role.edit(position=pos)
+                await role.edit(position=_boost_base_pos(ctx.guild))
             except Exception:
                 pass
             await ctx.author.add_roles(role)
@@ -2328,10 +2327,8 @@ async def m_myname(ctx, *, nome: str = None):
     try:
         if role is None:
             role = await ctx.guild.create_role(name="\u2726 " + nome[:20], hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
-            base = ctx.guild.get_role(1539797800932610068)
-            pos = base.position + 1 if base else role.position
             try:
-                await role.edit(position=pos)
+                await role.edit(position=_boost_base_pos(ctx.guild))
             except Exception:
                 pass
             await ctx.author.add_roles(role)
@@ -2916,6 +2913,16 @@ BOOSTER_PERMS = dict(
 )
 
 
+def _boost_base_pos(guild):
+    """Posicao para cargos custom de booster: logo acima do cargo 'booster'."""
+    base = discord.utils.get(guild.roles, name="booster")
+    if base is None:
+        base = guild.premium_subscriber_role
+    if base is None:
+        base = discord.utils.get(guild.roles, name="member")
+    return (base.position + 1) if base else 1
+
+
 class CorModal(discord.ui.Modal, title="cor do teu cargo"):
     hexv = discord.ui.TextInput(label="hex da cor", placeholder="#ff0055", max_length=7)
 
@@ -2953,8 +2960,7 @@ async def _panel_role(member, color=None, name=None):
     if role is None:
         nome = name or ("\u2726 " + member.display_name[:20])
         role = await member.guild.create_role(name=nome, color=color or discord.Color.default(), hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
-        base = member.guild.get_role(1539797800932610068)
-        pos = base.position + 1 if base else role.position
+        pos = _boost_base_pos(member.guild)
         try:
             await role.edit(position=pos)
         except Exception:
@@ -3031,6 +3037,36 @@ async def on_voice_state_update(member, before, after):
                 await ch.delete(reason="mycall vazia")
     except Exception:
         pass
+
+
+async def _call_sweep_loop():
+    """Varre de 30s em 30s e apaga calls 'call de *' vazias ha mais de 45s.
+    Garante a limpeza mesmo se o evento de voz falhar."""
+    await bot.wait_until_ready()
+    empty_since = {}
+    while not bot.is_closed():
+        try:
+            for g in list(bot.guilds):
+                for ch in g.voice_channels:
+                    if not ch.name.startswith("call de "):
+                        continue
+                    if len(ch.members) == 0:
+                        t = empty_since.get(ch.id)
+                        if t is None:
+                            empty_since[ch.id] = time.time()
+                        elif time.time() - t >= 45:
+                            try:
+                                await ch.delete(reason="call vazia (sweep)")
+                            except discord.NotFound:
+                                pass
+                            except Exception as e:
+                                print(f"[callsweep] {ch.name}: {e}", flush=True)
+                            empty_since.pop(ch.id, None)
+                    else:
+                        empty_since.pop(ch.id, None)
+        except Exception as e:
+            print(f"[callsweep] loop erro: {e}", flush=True)
+        await asyncio.sleep(30)
 
 
 @bot.event
@@ -3184,15 +3220,13 @@ def _embed_regras():
 def _embed_anuncio():
     emb = discord.Embed(
         title=f"{E_NITRO} PERKS DE BOOSTER",
-        description=("boostou? teu jogo mudou. olha tudo que tu ganha:\n\n"
-                     "**automatico, sem comando:**\n"
-                     f"{SETA_REGRAS} bypass de slowmode em todos os canais\n"
-                     f"{SETA_REGRAS} prioridade de fala na call (priority speaker)\n"
+        description=("boostou o server? tu ganha:\n\n"
+                     f"{SETA_REGRAS} bypass de slowmode\n"
+                     f"{SETA_REGRAS} prioridade de fala na call\n"
                      f"{SETA_REGRAS} criar threads publicas e privadas\n"
-                     f"{SETA_REGRAS} usar emojis de outros servers nas msgs\n"
-                     f"{SETA_REGRAS} bypass total do anti-spam/anti-raid\n"
-                     f"{SETA_REGRAS} dm automatica de obrigado quando boosta\n\n"
-                     "**painel exclusivo no #booster-lounge (botoes):**\n"
+                     f"{SETA_REGRAS} usar emojis de outros servers\n"
+                     f"{SETA_REGRAS} imune ao anti-spam e anti-raid\n\n"
+                     "e pelo painel no #booster-lounge:\n\n"
                      f"{SETA_REGRAS} cor do teu cargo personalizada\n"
                      f"{SETA_REGRAS} nome do teu cargo do teu jeito\n"
                      f"{SETA_REGRAS} trocar teu nick quando quiser\n"
