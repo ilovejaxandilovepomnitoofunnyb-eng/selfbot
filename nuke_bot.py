@@ -719,8 +719,13 @@ async def blame(ctx, pessoa: discord.User):
 @bot.hybrid_command(name="gping", description="ghost ping: menciona e apaga na hora")
 @install_any
 @ctx_any
-async def gping(ctx, pessoa: discord.User = None):
-    """Menciona @everyone (ou o usuario escolhido) e deleta em milissegundos."""
+@bot.hybrid_command(name="gping", description="ghost ping: menciona e apaga depois de um instante")
+@install_any
+@ctx_any
+async def gping(ctx, pessoa: discord.User = None, delay: float = 1.5):
+    """Menciona @everyone (ou o usuario escolhido) e deleta apos o delay.
+    Delay padrao 1.5s: tempo pro discord entregar a notificacao antes de
+    sumir com a msg. Apagar em 40ms nao notifica ninguem."""
     if not await _check_ok(ctx):
         return
     if await _nuke_guard(ctx):
@@ -732,10 +737,11 @@ async def gping(ctx, pessoa: discord.User = None):
     except Exception:
         pass
     alvo = pessoa.mention if pessoa else "@everyone"
+    espera = max(0.1, min(float(delay), 15))
     fu = getattr(getattr(ctx, "interaction", None), "followup", None)
     try:
         m = await ctx.channel.send(alvo, allowed_mentions=MENTIONS)
-        await asyncio.sleep(0.04)
+        await asyncio.sleep(espera)
         await m.delete()
         return
     except discord.HTTPException:
@@ -746,7 +752,7 @@ async def gping(ctx, pessoa: discord.User = None):
         return
     try:
         msg = await fu.send(alvo, wait=True, allowed_mentions=MENTIONS)
-        await asyncio.sleep(0.04)
+        await asyncio.sleep(espera)
         try:
             await fu.delete_message(msg.id)
         except Exception:
