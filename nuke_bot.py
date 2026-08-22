@@ -3219,24 +3219,18 @@ def _embed_regras():
 
 def _embed_anuncio():
     emb = discord.Embed(
-        title=f"{E_NITRO} PERKS DE BOOSTER",
+        title=f"{E_NITRO} perks de booster",
         description=("boostou o server? tu ganha:\n\n"
                      f"{SETA_REGRAS} bypass de slowmode\n"
                      f"{SETA_REGRAS} prioridade de fala na call\n"
                      f"{SETA_REGRAS} criar threads publicas e privadas\n"
-                     f"{SETA_REGRAS} usar emojis de outros servers\n"
-                     f"{SETA_REGRAS} imune ao anti-spam e anti-raid\n\n"
+                     f"{SETA_REGRAS} usar emojis de outros servers\n\n"
                      "e pelo painel no #booster-lounge:\n\n"
-                     f"{SETA_REGRAS} cor do teu cargo personalizada\n"
-                     f"{SETA_REGRAS} nome do teu cargo do teu jeito\n"
-                     f"{SETA_REGRAS} trocar teu nick quando quiser\n"
-                     f"{SETA_REGRAS} tua call privada (some quando vazia)\n\n"
-                     f"ainda nao es booster? entra ai: {INVITE_LINK}\n"
-                     "cada boost deixa o server mais forte"),
-        color=0xF47FFF,
-        url=INVITE_LINK)
-    emb.set_image(url=WELCOME_IMG)
-    emb.set_footer(text="set society - boost perks")
+                     f"{SETA_REGRAS} cor e nome do teu cargo\n"
+                     f"{SETA_REGRAS} trocar teu nick quando quiser\n\n"
+                     f"{INVITE_LINK}"),
+        color=0xF47FFF)
+    emb.set_footer(text="set society")
     return emb
 
 
