@@ -716,9 +716,6 @@ async def blame(ctx, pessoa: discord.User):
         await ctx.send(f"✖ {e}", delete_after=5, ephemeral=True)
 
 
-@bot.hybrid_command(name="gping", description="ghost ping: menciona e apaga na hora")
-@install_any
-@ctx_any
 @bot.hybrid_command(name="gping", description="ghost ping: menciona e apaga depois de um instante")
 @install_any
 @ctx_any
