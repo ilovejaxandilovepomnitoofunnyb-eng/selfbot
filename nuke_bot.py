@@ -2275,11 +2275,63 @@ async def _booster_gate(ctx):
     return True
 
 
+BROLE_FILE = "boost_roles.json"
+BOOST_ROLE_LIMIT = 2
+
+
+def _broles_key(member):
+    return f"{member.guild.id}:{member.id}"
+
+
+def _broles_ids(member):
+    try:
+        with open(os.path.join(BASE_DIR, BROLE_FILE), "r", encoding="utf-8") as f:
+            d = json.loads(f.read())
+        return list(d.get(_broles_key(member), []))
+    except Exception:
+        return []
+
+
+def _broles_set(member, ids):
+    try:
+        p = os.path.join(BASE_DIR, BROLE_FILE)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.loads(f.read())
+        except Exception:
+            d = {}
+        k = _broles_key(member)
+        ids = [str(i) for i in ids][-5:]
+        if ids:
+            d[k] = ids
+        else:
+            d.pop(k, None)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+    except Exception as e:
+        print(f"[broles] save falhou: {e}", flush=True)
+
+
+def _boost_roles_all(member):
+    """Todos os cargos custom do proprio membro (json + fallback prefixo ✦)."""
+    meus = []
+    vistos = set()
+    for rid in _broles_ids(member):
+        r = member.guild.get_role(int(rid))
+        if r is not None and r in member.roles:
+            meus.append(r)
+            vistos.add(r.id)
+    for r in member.roles:
+        if r.name.startswith("\u2726") and r.id not in vistos:
+            meus.append(r)
+            vistos.add(r.id)
+    _broles_set(member, [r.id for r in meus])
+    return meus
+
+
 def _boost_role_of(member):
-    for r in member.guild.roles:
-        if r.name.startswith("\u2726") and member in r.members:
-            return r
-    return None
+    rs = _boost_roles_all(member)
+    return rs[0] if rs else None
 
 
 @bot.command(name="mycolor")
@@ -2923,8 +2975,49 @@ def _boost_base_pos(guild):
     return (base.position + 1) if base else 1
 
 
-class CorModal(discord.ui.Modal, title="cor do teu cargo"):
-    hexv = discord.ui.TextInput(label="hex da cor", placeholder="#ff0055", max_length=7)
+class CargoNovoModal(discord.ui.Modal, title="cargo novo"):
+    nome = discord.ui.TextInput(label="nome do cargo", placeholder="rei do set", max_length=20)
+    hexv = discord.ui.TextInput(label="hex da cor", placeholder="#ff0055", max_length=7, required=False)
+
+    async def on_submit(self, inter):
+        mine = _boost_roles_all(inter.user)
+        if len(mine) >= BOOST_ROLE_LIMIT:
+            await inter.response.send_message(
+                f"limite de {BOOST_ROLE_LIMIT} cargos. deleta um antes.", ephemeral=True)
+            return
+        try:
+            color = discord.Color(int(str(self.hexv.value).strip().lstrip("#") or "99aab5", 16))
+        except Exception:
+            await inter.response.send_message("cor invalida. ex: #ff0055", ephemeral=True)
+            return
+        try:
+            role = await inter.guild.create_role(
+                name="\u2726 " + str(self.nome.value)[:20], color=color,
+                hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
+            try:
+                await role.edit(position=_boost_base_pos(inter.guild))
+            except Exception:
+                pass
+            await inter.user.add_roles(role)
+            ids = _broles_ids(inter.user)
+            ids.append(role.id)
+            _broles_set(inter.user, ids)
+            await inter.response.send_message(f"cargo criado: {role.name} ({len(mine) + 1}/{BOOST_ROLE_LIMIT})", ephemeral=True)
+        except Exception as e:
+            await inter.response.send_message(f"falhou: {e}", ephemeral=True)
+
+
+class CargoEditModal(discord.ui.Modal):
+    def __init__(self, role):
+        super().__init__(title="editar teu cargo")
+        self.role = role
+        self.nome = discord.ui.TextInput(
+            label="nome do cargo", max_length=20,
+            default=role.name.lstrip("\u2726 ").strip() or "meu cargo")
+        cor = "#%06x" % role.color.value if str(role.color) != "#000000" else "#ffffff"
+        self.hexv = discord.ui.TextInput(label="hex da cor", max_length=7, default=cor)
+        self.add_item(self.nome)
+        self.add_item(self.hexv)
 
     async def on_submit(self, inter):
         try:
@@ -2932,16 +3025,55 @@ class CorModal(discord.ui.Modal, title="cor do teu cargo"):
         except Exception:
             await inter.response.send_message("cor invalida. ex: #ff0055", ephemeral=True)
             return
-        role = await _panel_role(inter.user, color=color)
-        await inter.response.send_message(f"teu cargo {role.name} agora e #{str(self.hexv.value).lstrip('#')}", ephemeral=True)
+        try:
+            await self.role.edit(name="\u2726 " + str(self.nome.value)[:20], color=color, reason="perk booster")
+            await inter.response.send_message(f"cargo atualizado: \u2726 {self.nome.value}", ephemeral=True)
+        except Exception as e:
+            await inter.response.send_message(f"falhou: {e}", ephemeral=True)
 
 
-class NomeModal(discord.ui.Modal, title="nome do teu cargo"):
-    nome = discord.ui.TextInput(label="nome do cargo", placeholder="rei do set", max_length=20)
+class CargoDelSelect(discord.ui.Select):
+    def __init__(self, roles):
+        opts = [discord.SelectOption(label=r.name[:100], value=str(r.id)) for r in roles[:25]]
+        super().__init__(placeholder="qual cargo deletar?", options=opts)
+        self.meus = roles
 
-    async def on_submit(self, inter):
-        role = await _panel_role(inter.user, name="\u2726 " + str(self.nome.value)[:20])
-        await inter.response.send_message(f"cargo renomeado pra {role.name}", ephemeral=True)
+    async def callback(self, inter):
+        rid = int(self.values[0])
+        role = inter.guild.get_role(rid)
+        if role is not None and role in inter.user.roles and role in self.meus:
+            try:
+                await role.delete(reason="cargo deletado pelo dono")
+                ids = [i for i in _broles_ids(inter.user) if int(i) != rid]
+                _broles_set(inter.user, ids)
+                await inter.response.send_message("cargo deletado.", ephemeral=True)
+            except Exception as e:
+                await inter.response.send_message(f"falhou: {e}", ephemeral=True)
+        else:
+            await inter.response.send_message("esse cargo nao e teu.", ephemeral=True)
+
+
+class CargoEditSelect(discord.ui.Select):
+    def __init__(self, roles):
+        opts = [discord.SelectOption(label=r.name[:100], value=str(r.id)) for r in roles[:25]]
+        super().__init__(placeholder="qual cargo editar?", options=opts)
+        self.meus = roles
+
+    async def callback(self, inter):
+        role = inter.guild.get_role(int(self.values[0]))
+        if role is not None and role in self.meus:
+            await inter.response.send_modal(CargoEditModal(role))
+        else:
+            await inter.response.send_message("esse cargo nao e teu.", ephemeral=True)
+
+
+class CargoPickView(discord.ui.View):
+    def __init__(self, roles, modo):
+        super().__init__(timeout=90)
+        if modo == "del":
+            self.add_item(CargoDelSelect(roles))
+        else:
+            self.add_item(CargoEditSelect(roles))
 
 
 class NickModal(discord.ui.Modal, title="teu nick no server"):
@@ -2955,25 +3087,19 @@ class NickModal(discord.ui.Modal, title="teu nick no server"):
             await inter.response.send_message(f"falhou: {e}", ephemeral=True)
 
 
-async def _panel_role(member, color=None, name=None):
-    role = _boost_role_of(member)
-    if role is None:
-        nome = name or ("\u2726 " + member.display_name[:20])
-        role = await member.guild.create_role(name=nome, color=color or discord.Color.default(), hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
-        pos = _boost_base_pos(member.guild)
-        try:
-            await role.edit(position=pos)
-        except Exception:
-            pass
-        await member.add_roles(role)
-    else:
-        kw = {}
-        if color is not None:
-            kw["color"] = color
-        if name is not None:
-            kw["name"] = name
-        if kw:
-            await role.edit(hoist=False, permissions=discord.Permissions.none(), **kw)
+async def _panel_create_role(member, name, color=None):
+    """Cria um cargo custom NOVO para o membro (chamador valida o limite)."""
+    role = await member.guild.create_role(
+        name="\u2726 " + str(name)[:20], color=color or discord.Color.default(),
+        hoist=False, permissions=discord.Permissions.none(), reason="perk booster")
+    try:
+        await role.edit(position=_boost_base_pos(member.guild))
+    except Exception:
+        pass
+    await member.add_roles(role)
+    ids = _broles_ids(member)
+    ids.append(role.id)
+    _broles_set(member, ids)
     return role
 
 
@@ -2989,23 +3115,42 @@ class BoostPanel(discord.ui.View):
         await inter.response.send_message("so pra booster.", ephemeral=True)
         return False
 
-    @discord.ui.button(label="cor do cargo", style=discord.ButtonStyle.primary, custom_id="boost_cor")
-    async def b_cor(self, inter, button):
+    @discord.ui.button(label="cargo novo", style=discord.ButtonStyle.primary, custom_id="boost_new")
+    async def b_new(self, inter, button):
         if not await self._gate(inter):
             return
-        await inter.response.send_modal(CorModal())
+        mine = _boost_roles_all(inter.user)
+        if len(mine) >= BOOST_ROLE_LIMIT:
+            await inter.response.send_message(
+                f"limite de {BOOST_ROLE_LIMIT} cargos. deleta um antes.", ephemeral=True)
+            return
+        await inter.response.send_modal(CargoNovoModal())
 
-    @discord.ui.button(label="nome do cargo", style=discord.ButtonStyle.primary, custom_id="boost_nome")
-    async def b_nome(self, inter, button):
+    @discord.ui.button(label="editar cargo", style=discord.ButtonStyle.primary, custom_id="boost_edit")
+    async def b_edit(self, inter, button):
         if not await self._gate(inter):
             return
-        await inter.response.send_modal(NomeModal())
+        mine = _boost_roles_all(inter.user)
+        if not mine:
+            await inter.response.send_message("tu nao tem cargo custom ainda. cria um em 'cargo novo'.", ephemeral=True)
+            return
+        await inter.response.send_message("seu cargo:", view=CargoPickView(mine, "edit"), ephemeral=True)
 
     @discord.ui.button(label="meu nick", style=discord.ButtonStyle.secondary, custom_id="boost_nick")
     async def b_nick(self, inter, button):
         if not await self._gate(inter):
             return
         await inter.response.send_modal(NickModal())
+
+    @discord.ui.button(label="deletar cargo", style=discord.ButtonStyle.danger, custom_id="boost_del")
+    async def b_del(self, inter, button):
+        if not await self._gate(inter):
+            return
+        mine = _boost_roles_all(inter.user)
+        if not mine:
+            await inter.response.send_message("tu nao tem cargo custom pra deletar.", ephemeral=True)
+            return
+        await inter.response.send_message("deletar qual?", view=CargoPickView(mine, "del"), ephemeral=True)
 
 
 @bot.event
@@ -3120,9 +3265,10 @@ async def _setup_boost_guild(guild):
     emb = discord.Embed(
         title="PAINEL BOOSTER",
         description=f"{es[0] if es else ''} usa os botoes ai embaixo {es[1] if len(es) > 1 else ''}\n"
-                    "- cor do cargo: teu cargo personalizado com a cor que quiser\n"
-                    "- nome do cargo: renomeia teu cargo\n"
-                    "- meu nick: troca teu nick quando quiser",
+                    "- cargo novo: cria teu cargo (nome + cor), max 2 por booster\n"
+                    "- editar cargo: muda nome e cor de um teu cargo\n"
+                    "- meu nick: troca teu nick quando quiser\n"
+                    "- deletar cargo: apaga um teu cargo pra liberar slot",
         color=0xF47FFF,
         url=INVITE_LINK)
     emb.set_footer(text="perks automaticas: bypass slowmode, prioridade na call, threads")
