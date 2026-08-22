@@ -3182,17 +3182,26 @@ def _embed_regras():
 
 def _embed_anuncio():
     emb = discord.Embed(
-        title=f"{E_NITRO} SET SOCIETY",
-        description="server de call, risada e caos controlado\n\n"
-                    "**perks de booster**\n"
-                    "- bypass de slowmode e prioridade na call\n"
-                    "- cor e nome de cargo personalizados\n"
-                    "- call privada (some quando vazia)\n\n"
-                    f"convite: {INVITE_LINK}",
+        title=f"{E_NITRO} PERKS DE BOOSTER",
+        description=("boostou? teu jogo mudou. olha tudo que tu ganha:\n\n"
+                     "**automatico, sem comando:**\n"
+                     f"{SETA_REGRAS} bypass de slowmode em todos os canais\n"
+                     f"{SETA_REGRAS} prioridade de fala na call (priority speaker)\n"
+                     f"{SETA_REGRAS} criar threads publicas e privadas\n"
+                     f"{SETA_REGRAS} usar emojis de outros servers nas msgs\n"
+                     f"{SETA_REGRAS} bypass total do anti-spam/anti-raid\n"
+                     f"{SETA_REGRAS} dm automatica de obrigado quando boosta\n\n"
+                     "**painel exclusivo no #booster-lounge (botoes):**\n"
+                     f"{SETA_REGRAS} cor do teu cargo personalizada\n"
+                     f"{SETA_REGRAS} nome do teu cargo do teu jeito\n"
+                     f"{SETA_REGRAS} trocar teu nick quando quiser\n"
+                     f"{SETA_REGRAS} tua call privada (some quando vazia)\n\n"
+                     f"ainda nao es booster? entra ai: {INVITE_LINK}\n"
+                     "cada boost deixa o server mais forte"),
         color=0xF47FFF,
         url=INVITE_LINK)
     emb.set_image(url=WELCOME_IMG)
-    emb.set_footer(text="set society")
+    emb.set_footer(text="set society - boost perks")
     return emb
 
 
@@ -3215,16 +3224,25 @@ BOT_APP_URL = ("https://discord.com/oauth2/authorize"
 def _embed_addbot():
     s = SETA_REGRAS
     emb = discord.Embed(
-        title=f"{E_TOOLS} ADICIONA O BOT",
-        description="leva o **Jax Fanboy** pra qualquer dm, grupo ou server\n\n"
-                    "**como instalar (Meus Apps):**\n"
-                    f"{s} abre: {BOT_APP_URL}\n"
-                    f"{s} em *onde usar*, escolhe **Adicionar aos Meus Apps**\n"
-                    f"{s} autoriza e pronto \u2014 o bot fica contigo, sem precisar de server\n"
-                    f"{s} usa `/spam`, `/ping` e cia em qualquer conversa\n\n"
-                    "**ou pelo server:**\n"
-                    f"{s} clica no bot na lista de membros\n"
-                    f"{s} **Adicionar App** \u2192 **Adicionar aos Meus Apps**",
+        title=f"{E_TOOLS} LEVA O SET SOCIETY CONTIGO",
+        description=("eu quero te ver usando o **Set Society** em qualquer canto do "
+                     "discord \u2014 dm, grupo, server, onde seja.\n\n"
+                     "**por que adicionar aos Meus Apps:**\n"
+                     f"{s} funciona em **dm, grupo e server** \u2014 sem pedir perm de nada\n"
+                     f"{s} os comandos vao com voce pra qualquer conversa\n"
+                     f"{s} instalou uma vez, ficou salvo na tua conta pra sempre\n\n"
+                     "**como instalar (leva 1 minuto):**\n"
+                     f"{s} abre: {BOT_APP_URL}\n"
+                     f"{s} em *onde usar*, escolhe **Adicionar aos Meus Apps**\n"
+                     f"{s} autoriza e pronto \u2014 o bot fica contigo, sem precisar de server\n\n"
+                     "**o que tu usa logo de cara:**\n"
+                     f"{s} `/spam` \u2014 envios automaticos em dm, grupo ou server\n"
+                     f"{s} `/ping` \u2014 latencia na hora, direto do bot\n"
+                     f"{s} e uma colecao de comandos esperando tu descobrir\n\n"
+                     "**ta no pc?**\n"
+                     f"{s} clica no bot na lista de membros\n"
+                     f"{s} **Adicionar App** \u2192 **Adicionar aos Meus Apps**\n\n"
+                     "instalou? chama os amigos e testa \u2014 quanto mais gente, melhor a zoeira"),
         color=0x5865F2,
         url=BOT_APP_URL)
     emb.set_thumbnail(url=WELCOME_IMG)
