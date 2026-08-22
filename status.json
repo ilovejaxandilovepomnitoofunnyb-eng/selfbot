@@ -1,7 +1,8 @@
 {
- "tipo": "modo3_diag",
- "attachments": 1,
- "content_head": "🔥 **SET SOCIETY WAS HERE NIGGER** 🔥\ndiscord.gg/TGaUktD9D\n@everyone @here @here @here @everyone @everyone @everyone\n𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫 𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫𒐫 𒐫𒐫𒐫𒐫𒐫𒐫𒐫",
- "modo": 3,
- "ts": "2026-08-22T18:49:58.137699+00:00"
+ "tipo": "burst_fail",
+ "canal": "advertises",
+ "pedidos": 20,
+ "enviados": 6,
+ "erro": "HTTP 400: 400 Bad Request (error code: 40094): This interaction has hit the maximum number of follow up messages",
+ "ts": "2026-08-22T18:50:03.945897+00:00"
 }
