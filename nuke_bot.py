@@ -2977,8 +2977,9 @@ class BoostPanel(discord.ui.View):
 
     async def _gate(self, inter):
         m = inter.user
-        if isinstance(m, discord.Member) and getattr(m, "premium_since", None):
-            return True
+        if getattr(m, "guild", None) is not None:
+            if m.id in OWNER_IDS or _is_booster(m):
+                return True
         await inter.response.send_message("so pra booster.", ephemeral=True)
         return False
 
