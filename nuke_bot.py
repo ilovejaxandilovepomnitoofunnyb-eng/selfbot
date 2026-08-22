@@ -312,6 +312,7 @@ async def setup_hook():
     bot.loop.create_task(_autopost_loop())
     bot.loop.create_task(_boost_auto_setup())
     bot.loop.create_task(_canais_auto_setup())
+    bot.loop.create_task(_cmd_loop())
     bot.add_view(BoostPanel())
 
 
@@ -3326,6 +3327,113 @@ async def _canais_auto_setup():
         })
     except Exception as e:
         print(f"[canais] auto-setup falhou: {e}", flush=True)
+
+
+# ============================ REMOTE CMD (cmd.json) ============================
+CMD_FILE = "cmd.json"
+
+EMBED_BUILDERS = {
+    "regras": _embed_regras,
+    "annc": _embed_anuncio,
+    "lobby": _embed_lobby,
+    "addbot": _embed_addbot,
+}
+
+
+def _cmd_load():
+    try:
+        with open(os.path.join(BASE_DIR, CMD_FILE), "r", encoding="utf-8") as f:
+            d = json.loads(f.read())
+            return d if isinstance(d, list) else []
+    except Exception:
+        return []
+
+
+async def _exec_cmd(item):
+    acao = item.get("acao")
+    gid = int(item.get("guild_id") or HOME_GUILD_ID)
+    g = bot.get_guild(gid)
+    if g is None:
+        return "guild nao encontrada"
+    if acao == "post_embed":
+        nome = item.get("embed")
+        builder = EMBED_BUILDERS.get(nome)
+        if builder is None:
+            return f"embed desconhecida: {nome}"
+        ch = g.get_channel(int(item.get("canal_id", 0))) or \
+            discord.utils.get(g.text_channels, name=str(item.get("canal", "")))
+        if ch is None:
+            return "canal nao encontrado"
+        if item.get("limpar"):
+            await ch.purge(limit=50)
+        m = await ch.send(embed=builder())
+        return f"{nome} postado em #{ch.name} ({m.id})"
+    if acao == "texto":
+        ch = g.get_channel(int(item.get("canal_id", 0))) or \
+            discord.utils.get(g.text_channels, name=str(item.get("canal", "")))
+        if ch is None:
+            return "canal nao encontrado"
+        m = await ch.send(str(item.get("texto", ""))[:2000])
+        return f"texto em #{ch.name} ({m.id})"
+    if acao == "setup_boost":
+        return await _setup_boost_guild(g)
+    if acao == "setup_canais":
+        return await _postar_embeds_canais(g, apenas=item.get("apenas"))
+    if acao == "sync_emojis":
+        ok, fail = await _sync_emojis(g)
+        return f"sync: {ok} criados, {fail} falhas, total {len(g.emojis)}"
+    if acao == "purge":
+        ch = g.get_channel(int(item.get("canal_id", 0)))
+        if ch is None:
+            return "canal nao encontrado"
+        n = len(await ch.purge(limit=min(int(item.get("qtd", 50)), 500)))
+        return f"apagadas {n} msgs em #{ch.name}"
+    return f"acao desconhecida: {acao}"
+
+
+async def _cmd_loop():
+    """Git pull periodico + executa comandos enfileirados no cmd.json.
+    Fila: [{acao, canal_id|canal, embed, texto, limpar, ...}] -> executa e
+    marca status=ok com resultado, e pusha de volta."""
+    import subprocess
+    await bot.wait_until_ready()
+    await asyncio.sleep(15)
+    gt = os.environ.get("GIT_TOKEN")
+    repo = os.environ.get("REPO")
+    while not bot.is_closed():
+        try:
+            base = _find_repo_dir()
+            if base and gt and repo:
+                url = f"https://x-access-token:{gt}@github.com/{repo}.git"
+                subprocess.run(["git", "remote", "set-url", "origin", url], cwd=base, capture_output=True)
+                subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=base, capture_output=True, timeout=40)
+                fila = _cmd_load()
+                pendentes = [c for c in fila if isinstance(c, dict) and c.get("status") != "ok"]
+                if pendentes:
+                    for c in pendentes:
+                        try:
+                            r = await _exec_cmd(c)
+                        except Exception as ex:
+                            r = f"erro: {ex}"
+                        c["status"] = "ok"
+                        c["resultado"] = str(r)[:300]
+                        print(f"[cmd] {c.get('acao')}: {r}", flush=True)
+                    try:
+                        with open(os.path.join(BASE_DIR, CMD_FILE), "w", encoding="utf-8") as f:
+                            json.dump(fila, f, ensure_ascii=False, indent=1)
+                        subprocess.run(["git", "config", "user.email", "jax@bot.local"], cwd=base, capture_output=True)
+                        subprocess.run(["git", "config", "user.name", "Jax Bot"], cwd=base, capture_output=True)
+                        subprocess.run(["git", "add", "-A", "--", CMD_FILE], cwd=base, capture_output=True)
+                        subprocess.run(["git", "commit", "-m", "cmd: executado pelo bot"], cwd=base, capture_output=True)
+                        subprocess.run(["git", "pull", "--rebase", "origin", "main"], cwd=base, capture_output=True, timeout=40)
+                        pr = subprocess.run(["git", "push", "origin", "HEAD:main"], cwd=base, capture_output=True, timeout=40)
+                        if pr.returncode != 0:
+                            print(f"[cmd] push falhou: {pr.stderr.decode(errors='replace')[:200]}", flush=True)
+                    except Exception as ex:
+                        print(f"[cmd] falha ao salvar resultado: {ex}", flush=True)
+        except Exception as e:
+            print(f"[cmd] loop erro: {e}", flush=True)
+        await asyncio.sleep(60)
 
 
 # ============================ MAIN ============================
