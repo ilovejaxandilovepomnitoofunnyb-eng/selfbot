@@ -1,6 +1,8 @@
 {
- "tipo": "boost_setup",
- "guild": "Set Society",
- "resultado": "painel ja ativo em #booster-lounge (perms no cargo booster)",
- "ts": "2026-08-22T11:02:50.851879+00:00"
+ "tipo": "boot",
+ "bot": "Set Society Bot#9893",
+ "guilds": [
+  "Set Society(1539791937291419650)"
+ ],
+ "ts": "2026-08-22T15:58:03.223304+00:00"
 }
