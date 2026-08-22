@@ -3007,24 +3007,6 @@ class BoostPanel(discord.ui.View):
             return
         await inter.response.send_modal(NickModal())
 
-    @discord.ui.button(label="minha call", style=discord.ButtonStyle.success, custom_id="boost_call")
-    async def b_call(self, inter, button):
-        if not await self._gate(inter):
-            return
-        guild = inter.guild
-        brole = guild.premium_subscriber_role
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(connect=False),
-            inter.user: discord.PermissionOverwrite(connect=True, manage_channels=True, move_members=True),
-            guild.me: discord.PermissionOverwrite(connect=True),
-        }
-        if brole is not None:
-            overwrites[brole] = discord.PermissionOverwrite(connect=True)
-        ch = await guild.create_voice_channel(
-            name=f"call de {inter.user.display_name}"[:100],
-            user_limit=10, overwrites=overwrites, reason="perk booster")
-        await inter.response.send_message(f"call privada criada: {ch.name}", ephemeral=True)
-
 
 @bot.event
 async def on_voice_state_update(member, before, after):
