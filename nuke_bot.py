@@ -2076,6 +2076,8 @@ async def on_member_join(member):
                 await _log_mod(member.guild, f"autore: {member} entrou e levou {role.name}")
     except Exception as e:
         print(f"[autore] falha: {e}", flush=True)
+        _status_push({"tipo": "autore_join_erro", "erro": f"{type(e).__name__}: {str(e)[:150]}",
+                      "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
     try:
         await _send_welcome(member)
     except Exception as e:
@@ -2102,7 +2104,19 @@ async def _fix_member_roles(guild):
         await guild.chunk(cache=True)
     except Exception:
         pass
+    # hierarquia: autorole tem que ficar ABAIXO do topo do bot, senao o
+    # discord nega TODOS os add_roles silenciosamente
+    me = guild.me
+    if me is not None and role.position >= me.top_role.position:
+        try:
+            await role.edit(position=max(1, me.top_role.position - 1),
+                            reason="autorole: ajuste de hierarquia")
+            await _log_mod(guild, f"autore: cargo {role.name} rebaixado abaixo do bot pra liberar atribuicao")
+        except Exception as e:
+            _status_push({"tipo": "autore_hierarquia", "erro": str(e)[:150],
+                          "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
     ok = 0
+    primeiro_erro = ""
     for m in guild.members:
         if m.bot or m.id == guild.owner_id:
             continue
@@ -2110,8 +2124,12 @@ async def _fix_member_roles(guild):
             try:
                 await m.add_roles(role)
                 ok += 1
-            except Exception:
-                pass
+            except Exception as e:
+                if not primeiro_erro:
+                    primeiro_erro = f"{type(e).__name__}: {str(e)[:120]} (membro {m})"
+    if primeiro_erro:
+        _status_push({"tipo": "autore_erro", "erro": primeiro_erro,
+                      "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
     return ok
 
 
@@ -2140,7 +2158,7 @@ async def _autorole_loop():
                     print(f"[autore] varredura {g.name} erro: {e}", flush=True)
         except Exception as e:
             print(f"[autore] loop erro: {e}", flush=True)
-        await asyncio.sleep(300)
+        await asyncio.sleep(90)
 
 
 
