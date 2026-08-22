@@ -725,8 +725,10 @@ async def gping(ctx, pessoa: discord.User = None):
         return
     if await _nuke_guard(ctx):
         return
+    # efemero SO em servidor; em dm/grupo o defer tem que ser publico,
+    # senao o followup do ghost ping nasce invisivel pros outros membros
     try:
-        await ctx.defer(ephemeral=True)
+        await ctx.defer(ephemeral=ctx.guild is not None)
     except Exception:
         pass
     alvo = pessoa.mention if pessoa else "@everyone"
