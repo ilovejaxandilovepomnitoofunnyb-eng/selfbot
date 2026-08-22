@@ -3140,8 +3140,7 @@ async def _setup_boost_guild(guild):
         description=f"{es[0] if es else ''} usa os botoes ai embaixo {es[1] if len(es) > 1 else ''}\n"
                     "- cor do cargo: teu cargo personalizado com a cor que quiser\n"
                     "- nome do cargo: renomeia teu cargo\n"
-                    "- meu nick: troca teu nick quando quiser\n"
-                    "- minha call: cria call privada so tua (some quando vazia)",
+                    "- meu nick: troca teu nick quando quiser",
         color=0xF47FFF,
         url=INVITE_LINK)
     emb.set_footer(text="perks automaticas: bypass slowmode, prioridade na call, threads")
