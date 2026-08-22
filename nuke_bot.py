@@ -1841,14 +1841,16 @@ async def poll(ctx, pergunta: str, opcoes: str = "sim|nao", duracao_h: int = 24,
     Em servidor sai por webhook (sem atribuicao); dm/grupo vai pela interacao."""
     if not await _check_ok(ctx):
         return
+    # efemero so em servidor; em dm/grupo o followup precisa ser publico
     try:
-        await ctx.defer(ephemeral=True)
+        await ctx.defer(ephemeral=ctx.guild is not None)
     except Exception:
         pass
     resp = [o.strip()[:55] for o in opcoes.split("|") if o.strip()] or ["sim", "nao"]
     resp = resp[:10]
     dur = max(1, min(int(duracao_h), 768))
     qtd = max(1, min(int(qtd), 20))
+    fu = getattr(getattr(ctx, "interaction", None), "followup", None)
     enviadas = 0
     erro = ""
     for _ in range(qtd):
@@ -1858,7 +1860,14 @@ async def poll(ctx, pergunta: str, opcoes: str = "sim|nao", duracao_h: int = 24,
         for r in resp:
             p.add_answer(text=r)
         try:
+            # 1) webhook anonimo (servidor) -> 2) interacao (funciona em dm/grupo)
+            # -> 3) channel.send direto
             m = await _wh_send(ctx.channel, poll=p)
+            if m is None and fu is not None:
+                try:
+                    m = await fu.send(poll=p, wait=True, allowed_mentions=MENTIONS)
+                except discord.HTTPException:
+                    m = None
             if m is None:
                 m = await ctx.channel.send(poll=p)
             enviadas += 1
